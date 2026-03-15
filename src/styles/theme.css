@@ -124,8 +124,14 @@
     @apply border-border outline-ring/50;
   }
 
+  ::-webkit-scrollbar        { width: 6px; }
+  ::-webkit-scrollbar-track  { background: transparent; }
+  ::-webkit-scrollbar-thumb  { background: rgba(148,163,184,0.2); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.35); }
+
   body {
     @apply bg-background text-foreground;
+    background-color: #020617;
   }
 
   /**
@@ -135,6 +141,8 @@
 
   html {
     font-size: var(--font-size);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
   }
 
   h1 {

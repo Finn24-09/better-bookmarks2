@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { Header } from "./components/Header";
 import { SearchBar } from "./components/SearchBar";
 import { TagFilter } from "./components/TagFilter";
 import { BookmarkCard } from "./components/BookmarkCard";
 import { FloatingFooter } from "./components/FloatingFooter";
 import { AddBookmarkButton } from "./components/AddBookmarkButton";
+import { BookmarkFormModal } from "./components/BookmarkFormModal";
 
 // Dummy data for demonstration
 const bookmarks = [
@@ -77,6 +79,13 @@ const allTags = Array.from(
 ).sort();
 
 export default function App() {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingBookmark, setEditingBookmark] = useState<typeof bookmarks[0] | null>(null);
+
+  const handleOpenAdd = () => { setEditingBookmark(null); setModalOpen(true); };
+  const handleOpenEdit = (bookmark: typeof bookmarks[0]) => { setEditingBookmark(bookmark); setModalOpen(true); };
+  const handleClose = () => setModalOpen(false);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950">
       {/* Header */}
@@ -102,17 +111,18 @@ export default function App() {
               title={bookmark.title}
               url={bookmark.url}
               tags={bookmark.tags}
+              onEdit={() => handleOpenEdit(bookmark)}
             />
           ))}
         </div>
       </div>
 
       {/* Add Bookmark Button - fixed FAB aligned to grid */}
-      <div className="fixed bottom-20 left-0 right-0 z-40 pointer-events-none">
+      <div className="fixed bottom-20 left-0 right-0 z-40 pointer-events-none" style={{ paddingRight: 'var(--removed-body-scroll-bar-size, 0px)' }}>
         <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8">
           <div className="flex justify-end">
             <div className="pointer-events-auto">
-              <AddBookmarkButton />
+              <AddBookmarkButton onClick={handleOpenAdd} />
             </div>
           </div>
         </div>
@@ -120,6 +130,13 @@ export default function App() {
 
       {/* Floating Footer */}
       <FloatingFooter />
+
+      {/* Add / Edit Bookmark Modal */}
+      <BookmarkFormModal
+        open={modalOpen}
+        onClose={handleClose}
+        initialData={editingBookmark}
+      />
     </div>
   );
 }

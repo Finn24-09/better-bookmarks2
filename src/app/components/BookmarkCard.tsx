@@ -5,9 +5,10 @@ interface BookmarkCardProps {
   title: string;
   url: string;
   tags: string[];
+  onEdit?: () => void;
 }
 
-export function BookmarkCard({ thumbnail, title, url, tags }: BookmarkCardProps) {
+export function BookmarkCard({ thumbnail, title, url, tags, onEdit }: BookmarkCardProps) {
   return (
     <div className="group relative bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden transition-all duration-300 hover:bg-white/10 hover:border-white/20 hover:scale-[1.02] hover:shadow-2xl hover:shadow-purple-500/20">
       {/* Thumbnail */}
@@ -21,21 +22,21 @@ export function BookmarkCard({ thumbnail, title, url, tags }: BookmarkCardProps)
 
         {/* Action Buttons - Visible on mobile, overlay on hover for desktop */}
         <div className="absolute top-3 right-3 flex gap-2 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300">
-          <button className="w-10 h-10 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 transition-all duration-300 active:scale-95">
+          <button onClick={onEdit} className="w-10 h-10 bg-white/10 border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 transition-all duration-300 active:scale-95">
             <Pencil className="w-4 h-4 text-white" />
           </button>
         </div>
 
         {/* Play Icon Overlay - Center on desktop hover */}
-        <div className="absolute inset-0 items-center justify-center hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          <div className="w-16 h-16 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 transition-all duration-300">
+        <div className="absolute inset-0 items-center justify-center hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+          <div className="w-16 h-16 bg-white/10 border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 transition-all duration-300 pointer-events-auto">
             <Play className="w-8 h-8 text-white fill-white ml-1" />
           </div>
         </div>
 
         {/* Play Icon - Always visible on mobile, bottom-right */}
         <div className="absolute bottom-3 right-3 md:hidden">
-          <button className="w-12 h-12 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full flex items-center justify-center active:scale-95 transition-transform duration-300">
+          <button className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center active:scale-95 transition-transform duration-300">
             <Play className="w-6 h-6 text-white fill-white ml-0.5" />
           </button>
         </div>
