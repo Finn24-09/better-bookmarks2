@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { motion, LayoutGroup } from "motion/react";
 import { Header } from "./components/Header";
 import { SearchBar } from "./components/SearchBar";
 import { TagFilter } from "./components/TagFilter";
@@ -6,6 +7,8 @@ import { BookmarkCard } from "./components/BookmarkCard";
 import { FloatingFooter } from "./components/FloatingFooter";
 import { AddBookmarkButton } from "./components/AddBookmarkButton";
 import { BookmarkFormModal } from "./components/BookmarkFormModal";
+import { ChangePasswordModal } from "./components/ChangePasswordModal";
+import { DeleteAccountModal } from "./components/DeleteAccountModal";
 
 // Dummy data for demonstration
 const bookmarks = [
@@ -81,6 +84,8 @@ const allTags = Array.from(
 export default function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingBookmark, setEditingBookmark] = useState<typeof bookmarks[0] | null>(null);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
 
   const handleOpenAdd = () => { setEditingBookmark(null); setModalOpen(true); };
   const handleOpenEdit = (bookmark: typeof bookmarks[0]) => { setEditingBookmark(bookmark); setModalOpen(true); };
@@ -89,33 +94,42 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950">
       {/* Header */}
-      <Header />
+      <Header
+        onChangePassword={() => setChangePasswordOpen(true)}
+        onDeleteAccount={() => setDeleteAccountOpen(true)}
+      />
 
-      <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 px-4 md:px-6 lg:px-8 pt-6 md:pt-8 pb-8">
+      <LayoutGroup>
+        <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 px-4 md:px-6 lg:px-8 pt-6 md:pt-8 pb-8">
 
-        {/* Search and Filters */}
-        <div className="space-y-4">
-          {/* Search Bar */}
-          <SearchBar />
+          {/* Search and Filters */}
+          <div className="space-y-4">
+            {/* Search Bar */}
+            <SearchBar />
 
-          {/* Tag Filters */}
-          <TagFilter tags={allTags} />
+            {/* Tag Filters */}
+            <TagFilter tags={allTags} />
+          </div>
+
+          {/* Bookmarks Grid — layout so it smoothly repositions when TagFilter resizes */}
+          <motion.div
+            layout
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"
+          >
+            {bookmarks.map((bookmark) => (
+              <BookmarkCard
+                key={bookmark.id}
+                thumbnail={bookmark.thumbnail}
+                title={bookmark.title}
+                url={bookmark.url}
+                tags={bookmark.tags}
+                onEdit={() => handleOpenEdit(bookmark)}
+              />
+            ))}
+          </motion.div>
         </div>
-
-        {/* Bookmarks Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-          {bookmarks.map((bookmark) => (
-            <BookmarkCard
-              key={bookmark.id}
-              thumbnail={bookmark.thumbnail}
-              title={bookmark.title}
-              url={bookmark.url}
-              tags={bookmark.tags}
-              onEdit={() => handleOpenEdit(bookmark)}
-            />
-          ))}
-        </div>
-      </div>
+      </LayoutGroup>
 
       {/* Add Bookmark Button - fixed FAB aligned to grid */}
       <div className="fixed bottom-20 left-0 right-0 z-40 pointer-events-none" style={{ paddingRight: 'var(--removed-body-scroll-bar-size, 0px)' }}>
@@ -136,6 +150,18 @@ export default function App() {
         open={modalOpen}
         onClose={handleClose}
         initialData={editingBookmark}
+      />
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        open={changePasswordOpen}
+        onClose={() => setChangePasswordOpen(false)}
+      />
+
+      {/* Delete Account Modal */}
+      <DeleteAccountModal
+        open={deleteAccountOpen}
+        onClose={() => setDeleteAccountOpen(false)}
       />
     </div>
   );
