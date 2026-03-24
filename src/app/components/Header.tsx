@@ -1,4 +1,5 @@
 import { User, KeyRound, LogOut, Trash2, Mail } from "lucide-react";
+import { useNavigate } from "react-router";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -13,6 +14,8 @@ interface HeaderProps {
 }
 
 export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
+  const navigate = useNavigate();
+
   return (
     <div className="sticky top-0 z-50 py-4 md:py-5 bg-white/5 backdrop-blur-xl border-b border-white/10">
       <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 flex items-center justify-between">
@@ -50,7 +53,10 @@ export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
             <DropdownMenuSeparator className="bg-white/10 my-1" />
 
             {/* Logout */}
-            <DropdownMenuItem className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:text-white focus:text-white focus:bg-white/10 cursor-pointer transition-all duration-300">
+            <DropdownMenuItem
+              onSelect={() => navigate("/login")}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:text-white focus:text-white focus:bg-white/10 cursor-pointer transition-all duration-300"
+            >
               <LogOut className="w-4 h-4 shrink-0" />
               Log Out
             </DropdownMenuItem>
