@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
-import { Mail, Lock, Eye, EyeOff, Bookmark } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { FloatingFooter } from "./components/FloatingFooter";
 import { cn } from "./components/ui/utils";
 
@@ -156,7 +156,7 @@ export function AuthPage() {
           <div className="w-full max-w-[280px] flex flex-col gap-5">
             <div>
               <h2 className="text-2xl font-medium text-white mb-1">Create Account</h2>
-              <p className="text-sm text-white/50">Start saving your videos</p>
+              <p className="text-sm text-white/50">Start saving your bookmarks</p>
             </div>
             {registerFields}
             <button type="button" className={primaryBtn}>Create Account</button>
@@ -182,8 +182,8 @@ export function AuthPage() {
 
           {/* Brand mark — always visible */}
           <div className="mb-8 text-center">
-            <div className="w-12 h-12 bg-white/15 border border-white/20 rounded-2xl flex items-center justify-center mx-auto mb-3">
-              <Bookmark className="w-6 h-6 text-white" />
+            <div className="w-12 h-12 flex items-center justify-center mx-auto mb-3">
+              <img src="/favicon.svg" alt="" className="w-10 h-10" />
             </div>
             <p className="text-white/70 text-xs tracking-widest uppercase">
               Better Bookmarks 2
@@ -203,7 +203,7 @@ export function AuthPage() {
               >
                 <h2 className="text-2xl font-medium text-white">New Here?</h2>
                 <p className="text-white/70 text-sm leading-relaxed max-w-[220px]">
-                  Sign up and start saving your favorite videos
+                  Sign up and start saving your bookmarks
                 </p>
                 <button
                   type="button"
@@ -251,8 +251,8 @@ export function AuthPage() {
 
           {/* App name */}
           <motion.div layout="position" className="text-center">
-            <div className="w-10 h-10 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center mx-auto mb-3">
-              <Bookmark className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 flex items-center justify-center mx-auto mb-3">
+              <img src="/favicon.svg" alt="" className="w-10 h-10" />
             </div>
             <h1 className="text-white text-xl font-medium">Better Bookmarks 2</h1>
             <p className="text-white/50 text-sm mt-1">Your video bookmark manager</p>

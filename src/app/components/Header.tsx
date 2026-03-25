@@ -19,7 +19,10 @@ export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
   return (
     <div className="sticky top-0 z-50 py-4 md:py-5 bg-white/5 backdrop-blur-xl border-b border-white/10">
       <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 flex items-center justify-between">
-        <h1 className="text-white drop-shadow-lg">Better Bookmarks 2</h1>
+        <div className="flex items-center gap-3">
+          <img src="/favicon.svg" alt="" className="w-7 h-7" />
+          <h1 className="text-white drop-shadow-lg">Better Bookmarks 2</h1>
+        </div>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
