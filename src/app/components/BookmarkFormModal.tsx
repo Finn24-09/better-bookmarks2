@@ -1,4 +1,6 @@
+import { useState, useEffect } from "react";
 import { X, Trash2 } from "lucide-react";
+import { TagMultiSelect } from "./TagMultiSelect";
 import {
   Dialog,
   DialogPortal,
@@ -17,10 +19,16 @@ interface BookmarkFormModalProps {
     thumbnail?: string;
     tags: string[];
   } | null;
+  availableTags: string[];
 }
 
-export function BookmarkFormModal({ open, onClose, initialData }: BookmarkFormModalProps) {
+export function BookmarkFormModal({ open, onClose, initialData, availableTags }: BookmarkFormModalProps) {
   const isEditing = !!initialData;
+  const [selectedTags, setSelectedTags] = useState<string[]>(initialData?.tags ?? []);
+
+  useEffect(() => {
+    if (open) setSelectedTags(initialData?.tags ?? []);
+  }, [open, initialData]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -91,15 +99,11 @@ export function BookmarkFormModal({ open, onClose, initialData }: BookmarkFormMo
 
             {/* Tags */}
             <div className="space-y-1.5">
-              <label className="text-sm text-white/70">
-                Tags{" "}
-                <span className="text-white/40">(comma separated)</span>
-              </label>
-              <input
-                type="text"
-                placeholder="React, Tutorial, JavaScript…"
-                defaultValue={initialData?.tags.join(", ") ?? ""}
-                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
+              <label className="text-sm text-white/70">Tags</label>
+              <TagMultiSelect
+                available={availableTags}
+                selected={selectedTags}
+                onChange={setSelectedTags}
               />
             </div>
           </div>

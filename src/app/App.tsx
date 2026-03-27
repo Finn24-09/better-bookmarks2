@@ -150,6 +150,7 @@ export default function App() {
         open={modalOpen}
         onClose={handleClose}
         initialData={editingBookmark}
+        availableTags={allTags}
       />
 
       {/* Change Password Modal */}
