@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, LayoutGroup } from "motion/react";
 import { Header } from "./components/Header";
 import { SearchBar } from "./components/SearchBar";
@@ -9,91 +9,68 @@ import { AddBookmarkButton } from "./components/AddBookmarkButton";
 import { BookmarkFormModal } from "./components/BookmarkFormModal";
 import { ChangePasswordModal } from "./components/ChangePasswordModal";
 import { DeleteAccountModal } from "./components/DeleteAccountModal";
-
-// Dummy data for demonstration
-const bookmarks = [
-  {
-    id: 1,
-    thumbnail: "https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=800&auto=format&fit=crop",
-    title: "Complete React Tutorial for Beginners - Build a Full Application",
-    url: "youtube.com/watch?v=example1",
-    tags: ["React", "Tutorial", "JavaScript"],
-  },
-  {
-    id: 2,
-    thumbnail: "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=800&auto=format&fit=crop",
-    title: "Advanced TypeScript Patterns You Should Know",
-    url: "youtube.com/watch?v=example2",
-    tags: ["TypeScript", "Advanced"],
-  },
-  {
-    id: 3,
-    thumbnail: "https://images.unsplash.com/photo-1587620962725-abab7fe55159?w=800&auto=format&fit=crop",
-    title: "CSS Grid and Flexbox - Complete Layout Guide",
-    url: "vimeo.com/example3",
-    tags: ["CSS", "Design", "Tutorial"],
-  },
-  {
-    id: 4,
-    thumbnail: "https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&auto=format&fit=crop",
-    title: "Building REST APIs with Node.js and Express",
-    url: "youtube.com/watch?v=example4",
-    tags: ["Node.js", "Backend", "API"],
-  },
-  {
-    id: 5,
-    thumbnail: "https://images.unsplash.com/photo-1593720213428-28a5b9e94613?w=800&auto=format&fit=crop",
-    title: "Python Data Science Masterclass - Complete Course",
-    url: "udemy.com/example5",
-    tags: ["Python", "Data Science"],
-  },
-  {
-    id: 6,
-    thumbnail: "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop",
-    title: "Vue.js 3 Composition API Deep Dive",
-    url: "youtube.com/watch?v=example6",
-    tags: ["Vue", "JavaScript", "Advanced"],
-  },
-  {
-    id: 7,
-    thumbnail: "https://images.unsplash.com/photo-1551650975-87deedd944c3?w=800&auto=format&fit=crop",
-    title: "Docker and Kubernetes for Beginners",
-    url: "youtube.com/watch?v=example7",
-    tags: ["Docker", "DevOps", "Tutorial"],
-  },
-  {
-    id: 8,
-    thumbnail: "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=800&auto=format&fit=crop",
-    title: "Mobile App Design Principles and Best Practices",
-    url: "vimeo.com/example8",
-    tags: ["Design", "UI/UX"],
-  },
-  {
-    id: 9,
-    thumbnail: "https://images.unsplash.com/photo-1484417894907-623942c8ee29?w=800&auto=format&fit=crop",
-    title: "GraphQL Full Course - Building Modern APIs",
-    url: "youtube.com/watch?v=example9",
-    tags: ["GraphQL", "API", "Backend"],
-  },
-];
-
-const allTags = Array.from(
-  new Set(bookmarks.flatMap((bookmark) => bookmark.tags))
-).sort();
+import { useBookmarks } from "./hooks/useBookmarks";
+import type { Bookmark } from "../lib/bookmarks";
 
 export default function App() {
+  // --------------------------------------------------------------------------
+  // Lifted search/filter state (Phase 4)
+  // --------------------------------------------------------------------------
+  const [search, setSearch] = useState("");
+  const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
+
+  // --------------------------------------------------------------------------
+  // Data
+  // --------------------------------------------------------------------------
+  const { bookmarks, tags, isLoading, hasMore, isFiltered, loadMore, refresh } =
+    useBookmarks({ search, selectedTagId });
+
+  // --------------------------------------------------------------------------
+  // Modals
+  // --------------------------------------------------------------------------
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingBookmark, setEditingBookmark] = useState<typeof bookmarks[0] | null>(null);
+  const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
 
-  const handleOpenAdd = () => { setEditingBookmark(null); setModalOpen(true); };
-  const handleOpenEdit = (bookmark: typeof bookmarks[0]) => { setEditingBookmark(bookmark); setModalOpen(true); };
-  const handleClose = () => setModalOpen(false);
+  const handleOpenAdd = () => {
+    setEditingBookmark(null);
+    setModalOpen(true);
+  };
+  const handleOpenEdit = (bookmark: Bookmark) => {
+    setEditingBookmark(bookmark);
+    setModalOpen(true);
+  };
+
+  // --------------------------------------------------------------------------
+  // Infinite scroll sentinel (Phase 4)
+  // --------------------------------------------------------------------------
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const handleIntersect = useCallback(
+    (entries: IntersectionObserverEntry[]) => {
+      if (entries[0].isIntersecting && hasMore && !isLoading && !isFiltered) {
+        loadMore();
+      }
+    },
+    [hasMore, isLoading, isFiltered, loadMore],
+  );
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(handleIntersect, { rootMargin: "200px" });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [handleIntersect]);
+
+  // --------------------------------------------------------------------------
+  // Tag name lookup (for BookmarkCard display)
+  // --------------------------------------------------------------------------
+  const tagNameById = Object.fromEntries(tags.map((t) => [t.id, t.name]));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950">
-      {/* Header */}
       <Header
         onChangePassword={() => setChangePasswordOpen(true)}
         onDeleteAccount={() => setDeleteAccountOpen(true)}
@@ -104,35 +81,58 @@ export default function App() {
 
           {/* Search and Filters */}
           <div className="space-y-4">
-            {/* Search Bar */}
-            <SearchBar />
-
-            {/* Tag Filters */}
-            <TagFilter tags={allTags} />
+            <SearchBar value={search} onChange={setSearch} />
+            <TagFilter tags={tags} selected={selectedTagId} onSelect={setSelectedTagId} />
           </div>
 
-          {/* Bookmarks Grid — layout so it smoothly repositions when TagFilter resizes */}
-          <motion.div
-            layout
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"
-          >
-            {bookmarks.map((bookmark) => (
-              <BookmarkCard
-                key={bookmark.id}
-                thumbnail={bookmark.thumbnail}
-                title={bookmark.title}
-                url={bookmark.url}
-                tags={bookmark.tags}
-                onEdit={() => handleOpenEdit(bookmark)}
-              />
-            ))}
-          </motion.div>
+          {/* Bookmarks Grid */}
+          {bookmarks.length === 0 && !isLoading ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <p className="text-white/40 text-lg">
+                {isFiltered ? "No bookmarks match your search." : "No bookmarks yet."}
+              </p>
+              {!isFiltered && (
+                <p className="text-white/25 text-sm mt-2">
+                  Hit the + button to add your first bookmark.
+                </p>
+              )}
+            </div>
+          ) : (
+            <motion.div
+              layout
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"
+            >
+              {bookmarks.map((bookmark) => (
+                <BookmarkCard
+                  key={bookmark.id}
+                  thumbnail={bookmark.thumbnailUrl}
+                  title={bookmark.title}
+                  url={bookmark.url}
+                  tags={bookmark.tagIds.map((id) => tagNameById[id]).filter(Boolean)}
+                  onEdit={() => handleOpenEdit(bookmark)}
+                />
+              ))}
+            </motion.div>
+          )}
+
+          {/* Loading indicator */}
+          {isLoading && (
+            <div className="flex justify-center py-8">
+              <div className="w-6 h-6 rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
+            </div>
+          )}
+
+          {/* Infinite scroll sentinel */}
+          <div ref={sentinelRef} className="h-1" />
         </div>
       </LayoutGroup>
 
-      {/* Add Bookmark Button - fixed FAB aligned to grid */}
-      <div className="fixed bottom-20 left-0 right-0 z-40 pointer-events-none" style={{ paddingRight: 'var(--removed-body-scroll-bar-size, 0px)' }}>
+      {/* Add Bookmark FAB */}
+      <div
+        className="fixed bottom-20 left-0 right-0 z-40 pointer-events-none"
+        style={{ paddingRight: "var(--removed-body-scroll-bar-size, 0px)" }}
+      >
         <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8">
           <div className="flex justify-end">
             <div className="pointer-events-auto">
@@ -142,24 +142,32 @@ export default function App() {
         </div>
       </div>
 
-      {/* Floating Footer */}
       <FloatingFooter />
 
       {/* Add / Edit Bookmark Modal */}
       <BookmarkFormModal
         open={modalOpen}
-        onClose={handleClose}
-        initialData={editingBookmark}
-        availableTags={allTags}
+        onClose={() => setModalOpen(false)}
+        initialData={
+          editingBookmark
+            ? {
+                id: editingBookmark.id,
+                title: editingBookmark.title,
+                url: editingBookmark.url,
+                thumbnailUrl: editingBookmark.thumbnailUrl,
+                tagIds: editingBookmark.tagIds,
+              }
+            : null
+        }
+        availableTags={tags}
+        onSave={refresh}
       />
 
-      {/* Change Password Modal */}
       <ChangePasswordModal
         open={changePasswordOpen}
         onClose={() => setChangePasswordOpen(false)}
       />
 
-      {/* Delete Account Modal */}
       <DeleteAccountModal
         open={deleteAccountOpen}
         onClose={() => setDeleteAccountOpen(false)}

@@ -1,40 +1,47 @@
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { cn } from "./ui/utils";
+import type { Tag } from "../../lib/tags";
 
 interface TagFilterProps {
-  tags: string[];
+  tags: Tag[];
+  selected: string | null;   // tag id, or null for "All"
+  onSelect: (id: string | null) => void;
 }
 
-export function TagFilter({ tags }: TagFilterProps) {
+export function TagFilter({ tags, selected, onSelect }: TagFilterProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const baseTags = tags.slice(0, 5);
   const extraTags = tags.slice(5);
   const hasMoreTags = tags.length > 5;
   const n = extraTags.length;
 
-  // Only opacity — no scale — so tags occupy their full natural height the moment
-  // they're added to the DOM, giving the outer layout FLIP an accurate "after" height.
   const tagVariants = {
     initial: { opacity: 0 },
     animate: (i: number) => ({
       opacity: 1,
-      transition: { duration: 0.15, delay: i * 0.02 },       // enter: first → last
+      transition: { duration: 0.15, delay: i * 0.02 },
     }),
     exit: (i: number) => ({
       opacity: 0,
-      transition: { duration: 0.12, delay: (n - 1 - i) * 0.015 }, // exit: last → first
+      transition: { duration: 0.12, delay: (n - 1 - i) * 0.015 },
     }),
   };
 
+  const pillBase =
+    "px-4 py-2 backdrop-blur-xl border rounded-full transition-all duration-300 hover:scale-105 active:scale-95 text-sm";
+  const pillActive =
+    "bg-white/20 border-white/40 text-white";
+  const pillInactive =
+    "bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:border-white/20 hover:text-white";
+
   return (
-    // layout — smooth height FLIP on the outer card
     <motion.div
       layout
       transition={{ duration: 0.3, ease: "easeInOut" }}
       className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 overflow-hidden"
     >
-      {/* layout="position" — corrects for the parent's scaleY so the header stays still */}
       <motion.div layout="position" className="flex items-center justify-between mb-3">
         <h3 className="text-white/90 text-sm">Filter by Tags</h3>
         {hasMoreTags && (
@@ -54,36 +61,38 @@ export function TagFilter({ tags }: TagFilterProps) {
         )}
       </motion.div>
 
-      {/* layout="position" — corrects the flex container so tag buttons don't jump */}
       <motion.div layout="position" className="flex flex-wrap gap-2">
-        <button className="px-4 py-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full text-white transition-all duration-300 hover:bg-white/20 hover:scale-105 active:scale-95">
+        <button
+          onClick={() => onSelect(null)}
+          className={cn(pillBase, selected === null ? pillActive : pillInactive)}
+        >
           All
         </button>
 
         {baseTags.map((tag) => (
           <button
-            key={tag}
-            className="px-4 py-2 bg-white/5 backdrop-blur-xl border border-white/10 rounded-full text-white/70 transition-all duration-300 hover:bg-white/10 hover:border-white/20 hover:text-white hover:scale-105 active:scale-95"
+            key={tag.id}
+            onClick={() => onSelect(selected === tag.id ? null : tag.id)}
+            className={cn(pillBase, selected === tag.id ? pillActive : pillInactive)}
           >
-            {tag}
+            {tag.name}
           </button>
         ))}
 
-        {/* mode="popLayout" — exits are popped out of flow immediately, so the parent
-            FLIP and the exit fade can run concurrently without one cutting the other off */}
         <AnimatePresence initial={false}>
           {isExpanded &&
             extraTags.map((tag, i) => (
               <motion.button
-                key={tag}
+                key={tag.id}
                 custom={i}
                 variants={tagVariants}
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="px-4 py-2 bg-white/5 backdrop-blur-xl border border-white/10 rounded-full text-white/70 transition-colors duration-300 hover:bg-white/10 hover:border-white/20 hover:text-white active:scale-95"
+                onClick={() => onSelect(selected === tag.id ? null : tag.id)}
+                className={cn(pillBase, selected === tag.id ? pillActive : pillInactive)}
               >
-                {tag}
+                {tag.name}
               </motion.button>
             ))}
         </AnimatePresence>

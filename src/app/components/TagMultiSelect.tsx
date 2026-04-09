@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown, X, Plus } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
 import {
   Command,
@@ -10,23 +10,51 @@ import {
   CommandEmpty,
 } from "./ui/command";
 import { cn } from "./ui/utils";
+import type { Tag } from "../../lib/tags";
 
 interface TagMultiSelectProps {
-  available: string[];
-  selected: string[];
-  onChange: (tags: string[]) => void;
+  available: Tag[];
+  selected: string[];           // tag IDs
+  onChange: (tagIds: string[]) => void;
+  onCreateTag?: (name: string) => Promise<Tag>;
 }
 
-export function TagMultiSelect({ available, selected, onChange }: TagMultiSelectProps) {
+export function TagMultiSelect({
+  available,
+  selected,
+  onChange,
+  onCreateTag,
+}: TagMultiSelectProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
 
-  function toggle(tag: string) {
-    onChange(
-      selected.includes(tag)
-        ? selected.filter((t) => t !== tag)
-        : [...selected, tag]
-    );
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((t) => t !== id) : [...selected, id]);
   }
+
+  const filtered = available.filter((t) =>
+    t.name.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const showCreate =
+    onCreateTag &&
+    search.trim() !== "" &&
+    !available.some((t) => t.name.toLowerCase() === search.trim().toLowerCase());
+
+  const handleCreate = async () => {
+    if (!onCreateTag || !search.trim()) return;
+    setCreating(true);
+    try {
+      const newTag = await onCreateTag(search.trim());
+      onChange([...selected, newTag.id]);
+      setSearch("");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const selectedTags = available.filter((t) => selected.includes(t.id));
 
   return (
     <div className="w-full space-y-2">
@@ -50,7 +78,7 @@ export function TagMultiSelect({ available, selected, onChange }: TagMultiSelect
             <ChevronDown
               className={cn(
                 "w-4 h-4 text-white/40 transition-transform duration-300",
-                open && "rotate-180"
+                open && "rotate-180",
               )}
             />
           </button>
@@ -66,30 +94,32 @@ export function TagMultiSelect({ available, selected, onChange }: TagMultiSelect
                      rounded-2xl shadow-2xl shadow-purple-500/20 overflow-hidden"
         >
           <Command
-            filter={(value, search) =>
-              value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
-            }
+            shouldFilter={false}
             className="bg-transparent [&_[data-slot=command-input-wrapper]]:border-white/10 [&_[data-slot=command-input-wrapper]_svg]:text-white"
           >
             <CommandInput
               placeholder="Search tags…"
+              value={search}
+              onValueChange={setSearch}
               className="text-white/90 placeholder:text-white/40 text-sm"
             />
             <CommandList
               className="max-h-[200px] overflow-y-auto overscroll-contain touch-pan-y p-1"
               onWheel={(e) => { e.currentTarget.scrollTop += e.deltaY; }}
             >
-              <CommandEmpty className="py-6 text-center text-sm text-white/40">
-                No tags found.
-              </CommandEmpty>
+              {filtered.length === 0 && !showCreate && (
+                <CommandEmpty className="py-6 text-center text-sm text-white/40">
+                  No tags found.
+                </CommandEmpty>
+              )}
               <CommandGroup>
-                {available.map((tag) => {
-                  const isSelected = selected.includes(tag);
+                {filtered.map((tag) => {
+                  const isSelected = selected.includes(tag.id);
                   return (
                     <CommandItem
-                      key={tag}
-                      value={tag}
-                      onSelect={() => toggle(tag)}
+                      key={tag.id}
+                      value={tag.id}
+                      onSelect={() => toggle(tag.id)}
                       className="flex items-center gap-3 px-3 py-2 rounded-xl mx-1 cursor-pointer
                                  text-sm text-white/70
                                  data-[selected=true]:bg-white/10 data-[selected=true]:text-white/90
@@ -101,35 +131,51 @@ export function TagMultiSelect({ available, selected, onChange }: TagMultiSelect
                           "w-4 h-4 rounded-full border flex items-center justify-center shrink-0 transition-all duration-150",
                           isSelected
                             ? "bg-gradient-to-br from-purple-600 to-purple-800 border-purple-500"
-                            : "border-white/20"
+                            : "border-white/20",
                         )}
                       >
                         {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
                       </div>
-                      {tag}
+                      {tag.name}
                     </CommandItem>
                   );
                 })}
+
+                {/* Inline "Create tag" option */}
+                {showCreate && (
+                  <CommandItem
+                    value={`__create__${search}`}
+                    onSelect={handleCreate}
+                    disabled={creating}
+                    className="flex items-center gap-3 px-3 py-2 rounded-xl mx-1 cursor-pointer
+                               text-sm text-purple-300
+                               hover:bg-purple-500/10 hover:text-purple-200
+                               transition-colors duration-150"
+                  >
+                    <Plus className="w-4 h-4 shrink-0" />
+                    {creating ? `Creating "${search.trim()}"…` : `Create "${search.trim()}"`}
+                  </CommandItem>
+                )}
               </CommandGroup>
             </CommandList>
           </Command>
         </PopoverContent>
       </Popover>
 
-      {selected.length > 0 && (
+      {selectedTags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {selected.map((tag) => (
+          {selectedTags.map((tag) => (
             <span
-              key={tag}
+              key={tag.id}
               className="inline-flex items-center gap-1 pl-3 pr-1.5 py-1
                          bg-purple-600/20 border border-purple-500/30
                          rounded-full text-xs text-white/80 transition-all duration-200"
             >
-              {tag}
+              {tag.name}
               <button
                 type="button"
-                onClick={() => toggle(tag)}
-                aria-label={`Remove ${tag}`}
+                onClick={() => toggle(tag.id)}
+                aria-label={`Remove ${tag.name}`}
                 className="w-4 h-4 rounded-full flex items-center justify-center
                            hover:bg-white/20 transition-colors duration-150 shrink-0"
               >

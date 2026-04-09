@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, AlertTriangle, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router";
 import {
   Dialog,
   DialogPortal,
@@ -8,19 +9,62 @@ import {
 } from "./ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
+import { deleteAccount } from "../../lib/auth";
+import { useAuth } from "../contexts/AuthContext";
 
 interface DeleteAccountModalProps {
   open: boolean;
   onClose: () => void;
 }
 
+const HOLD_DURATION = 3000; // ms
+
 export function DeleteAccountModal({ open, onClose }: DeleteAccountModalProps) {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+  const [password, setPassword] = useState("");
   const [holding, setHolding] = useState(false);
+  const [error, setError] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleClose = () => {
     setHolding(false);
+    setPassword("");
+    setError("");
     onClose();
   };
+
+  // When the hold completes, trigger deletion with the entered password.
+  useEffect(() => {
+    if (holding) {
+      timerRef.current = setTimeout(async () => {
+        setHolding(false);
+        if (!password) {
+          setError("Please enter your password to confirm deletion");
+          return;
+        }
+        setIsDeleting(true);
+        setError("");
+        try {
+          await deleteAccount(password);
+          logout();
+          navigate("/login", { replace: true });
+        } catch (err) {
+          setIsDeleting(false);
+          setError(err instanceof Error ? err.message : "Failed to delete account");
+        }
+      }, HOLD_DURATION);
+    } else {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [holding, password, logout, navigate]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
@@ -44,7 +88,7 @@ export function DeleteAccountModal({ open, onClose }: DeleteAccountModalProps) {
             <h2 className="text-lg font-semibold text-white">Delete Account</h2>
             <DialogClose asChild>
               <button
-                onClick={() => setHolding(false)}
+                onClick={handleClose}
                 className="w-9 h-9 bg-white/10 border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 active:scale-95 transition-all duration-300"
               >
                 <X className="w-4 h-4 text-white" />
@@ -66,17 +110,33 @@ export function DeleteAccountModal({ open, onClose }: DeleteAccountModalProps) {
             </div>
           </div>
 
+          {/* Password confirmation */}
+          <div className="mt-5 space-y-1.5">
+            <label className="text-sm text-white/70">Confirm your password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password…"
+              autoComplete="current-password"
+              className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
+
           {/* Footer */}
-          <div className="space-y-3 mt-6">
+          <div className="space-y-3 mt-5">
             {/* Hold-to-confirm button */}
             <button
+              disabled={isDeleting}
               className={cn(
                 "relative w-full overflow-hidden rounded-full px-6 py-3",
                 "border border-red-500/30 text-red-300 text-sm",
                 "shadow-lg shadow-red-500/20",
                 "hover:border-red-500/50 hover:shadow-red-500/30",
                 "select-none cursor-pointer transition-colors duration-300",
-                "focus:outline-none",
+                "focus:outline-none disabled:opacity-60 disabled:pointer-events-none",
               )}
               onMouseDown={() => setHolding(true)}
               onMouseUp={() => setHolding(false)}
@@ -95,14 +155,14 @@ export function DeleteAccountModal({ open, onClose }: DeleteAccountModalProps) {
               {/* Label */}
               <span className="relative z-10 flex items-center justify-center gap-2">
                 <Trash2 className="w-4 h-4" />
-                Hold to permanently delete
+                {isDeleting ? "Deleting…" : "Hold to permanently delete"}
               </span>
             </button>
 
             {/* Cancel */}
             <DialogClose asChild>
               <button
-                onClick={() => setHolding(false)}
+                onClick={handleClose}
                 className="w-full px-6 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-full hover:bg-white/10 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 text-sm"
               >
                 Cancel

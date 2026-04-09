@@ -1,0 +1,253 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, waitFor, act } from '@testing-library/react';
+import { useBookmarks } from './useBookmarks';
+import type { Bookmark } from '../../lib/bookmarks';
+
+// ---------------------------------------------------------------------------
+// Mock dependencies
+// ---------------------------------------------------------------------------
+
+const mockCryptoKey = {} as CryptoKey;
+
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: () => ({ cryptoKey: mockCryptoKey }),
+}));
+
+vi.mock('../../lib/bookmarks', () => ({
+  getBookmarks: vi.fn(),
+}));
+
+vi.mock('../../lib/tags', () => ({
+  getTags: vi.fn(),
+}));
+
+// Import the mocked functions so we can configure them per-test.
+import { getBookmarks } from '../../lib/bookmarks';
+import { getTags } from '../../lib/tags';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeBookmarks(count: number, idOffset = 0): Bookmark[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `bm-${idOffset + i}`,
+    title: `Bookmark ${idOffset + i}`,
+    url: `https://example.com/${idOffset + i}`,
+    thumbnailUrl: null,
+    tagIds: [],
+    createdAt: '',
+    updatedAt: '',
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('useBookmarks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getTags).mockResolvedValue([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Paginated base mode (no search/filter)
+  // -------------------------------------------------------------------------
+  it('initial fetch uses limit=20 and offset=0', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(20));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(getBookmarks).toHaveBeenCalledWith(mockCryptoKey, { limit: 20, offset: 0 });
+  });
+
+  it('hasMore is true when the page is exactly full (20 items)', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(20));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasMore).toBe(true);
+  });
+
+  it('hasMore is false when the page is not full (< 20 items)', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(7));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  it('loadMore fetches next page with offset=20 and appends results', async () => {
+    vi.mocked(getBookmarks)
+      .mockResolvedValueOnce(makeBookmarks(20))       // initial page
+      .mockResolvedValueOnce(makeBookmarks(5, 20));   // second page
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      result.current.loadMore();
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(getBookmarks).toHaveBeenCalledWith(mockCryptoKey, { limit: 20, offset: 20 });
+    expect(result.current.bookmarks).toHaveLength(25);
+  });
+
+  it('hasMore is false after loadMore returns a partial page', async () => {
+    vi.mocked(getBookmarks)
+      .mockResolvedValueOnce(makeBookmarks(20))
+      .mockResolvedValueOnce(makeBookmarks(3, 20));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => { result.current.loadMore(); });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Filtered mode (search or tag)
+  // -------------------------------------------------------------------------
+  it('when search is active, fetches all bookmarks without pagination options', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(3));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: 'hello', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // fetchAll=true → called with key only (no limit/offset)
+    expect(getBookmarks).toHaveBeenCalledWith(mockCryptoKey);
+  });
+
+  it('when search is active, hasMore is always false', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(20));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: 'hello', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  it('search filters bookmarks by title (case-insensitive)', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue([
+      { id: 'bm-1', title: 'Hello World', url: 'https://a.com', thumbnailUrl: null, tagIds: [], createdAt: '', updatedAt: '' },
+      { id: 'bm-2', title: 'Other Bookmark', url: 'https://b.com', thumbnailUrl: null, tagIds: [], createdAt: '', updatedAt: '' },
+    ]);
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: 'hello', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.bookmarks).toHaveLength(1);
+    expect(result.current.bookmarks[0].id).toBe('bm-1');
+  });
+
+  it('search filters bookmarks by URL as well', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue([
+      { id: 'bm-1', title: 'A Page', url: 'https://github.com/foo', thumbnailUrl: null, tagIds: [], createdAt: '', updatedAt: '' },
+      { id: 'bm-2', title: 'B Page', url: 'https://example.com/bar', thumbnailUrl: null, tagIds: [], createdAt: '', updatedAt: '' },
+    ]);
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: 'github', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.bookmarks).toHaveLength(1);
+    expect(result.current.bookmarks[0].id).toBe('bm-1');
+  });
+
+  it('tag filter narrows results to bookmarks that have the selected tag', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue([
+      { id: 'bm-1', title: 'A', url: 'https://a.com', thumbnailUrl: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
+      { id: 'bm-2', title: 'B', url: 'https://b.com', thumbnailUrl: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '' },
+    ]);
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: 'tag-1' }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.bookmarks).toHaveLength(1);
+    expect(result.current.bookmarks[0].id).toBe('bm-1');
+  });
+
+  it('search and tag filter compose with AND logic', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue([
+      { id: 'bm-1', title: 'Hello', url: 'https://a.com', thumbnailUrl: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
+      { id: 'bm-2', title: 'Hello', url: 'https://b.com', thumbnailUrl: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '' },
+      { id: 'bm-3', title: 'Other', url: 'https://c.com', thumbnailUrl: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
+    ]);
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: 'hello', selectedTagId: 'tag-1' }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // Only bm-1 matches both conditions
+    expect(result.current.bookmarks).toHaveLength(1);
+    expect(result.current.bookmarks[0].id).toBe('bm-1');
+  });
+
+  it('isFiltered is true when search is non-empty', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue([]);
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: 'x', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isFiltered).toBe(true);
+  });
+
+  it('isFiltered is true when a tag is selected', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue([]);
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: 'tag-1' }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isFiltered).toBe(true);
+  });
+
+  it('isFiltered is false when search is empty and no tag selected', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue([]);
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isFiltered).toBe(false);
+  });
+});

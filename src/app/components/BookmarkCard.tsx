@@ -1,7 +1,7 @@
 import { ExternalLink, Play, Pencil } from "lucide-react";
 
 interface BookmarkCardProps {
-  thumbnail: string;
+  thumbnail?: string | null;
   title: string;
   url: string;
   tags: string[];
@@ -13,11 +13,15 @@ export function BookmarkCard({ thumbnail, title, url, tags, onEdit }: BookmarkCa
     <div className="group relative bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden transition-all duration-300 hover:bg-white/10 hover:border-white/20 hover:scale-[1.02] hover:shadow-2xl hover:shadow-purple-500/20">
       {/* Thumbnail */}
       <div className="relative aspect-video bg-gradient-to-br from-purple-900/20 to-slate-900/20 overflow-hidden">
-        <img
-          src={thumbnail}
-          alt={title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-        />
+        {thumbnail ? (
+          <img
+            src={thumbnail}
+            alt={title}
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+          />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-purple-900/40 to-slate-900/40" />
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/0 to-black/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
         {/* Action Buttons - Visible on mobile, overlay on hover for desktop */}
