@@ -77,6 +77,17 @@ describe('tags', () => {
   // -------------------------------------------------------------------------
   // setBookmarkTags — diff logic
   // -------------------------------------------------------------------------
+  it('setBookmarkTags sends Prefer: resolution=ignore-duplicates on POST to make inserts idempotent', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await setBookmarkTags('bm-1', ['tag-a'], []);
+
+    const post = fetchMock.mock.calls.find(([, o]) => o.method === 'POST');
+    expect(post).toBeDefined();
+    const headers = post![1].headers as Record<string, string>;
+    expect(headers['Prefer']).toContain('resolution=ignore-duplicates');
+  });
+
   it('setBookmarkTags POSTs only the tags that were added', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
 

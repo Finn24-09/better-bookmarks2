@@ -73,6 +73,7 @@ export async function setBookmarkTags(
     ...toAdd.map((tagId) =>
       apiFetch('/bookmark_tags', {
         method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates' },
         body: JSON.stringify({ bookmark_id: bookmarkId, tag_id: tagId }),
       }),
     ),

@@ -38,5 +38,12 @@ export async function apiFetch<T = unknown>(
   }
 
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  // PostgREST returns 201 with an empty body for inserts that don't use
+  // `Prefer: return=representation`. Catch the resulting SyntaxError so callers
+  // don't need to add that header just to avoid a crash.
+  try {
+    return (await response.json()) as T;
+  } catch {
+    return undefined as T;
+  }
 }

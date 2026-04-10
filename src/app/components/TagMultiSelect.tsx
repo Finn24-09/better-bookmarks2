@@ -149,10 +149,11 @@ export function TagMultiSelect({
                     disabled={creating}
                     className="flex items-center gap-3 px-3 py-2 rounded-xl mx-1 cursor-pointer
                                text-sm text-purple-300
+                               data-[selected=true]:bg-purple-500/10 data-[selected=true]:text-purple-200
                                hover:bg-purple-500/10 hover:text-purple-200
                                transition-colors duration-150"
                   >
-                    <Plus className="w-4 h-4 shrink-0" />
+                    <Plus className="w-4 h-4 shrink-0 text-purple-300" />
                     {creating ? `Creating "${search.trim()}"…` : `Create "${search.trim()}"`}
                   </CommandItem>
                 )}
