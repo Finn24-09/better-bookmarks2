@@ -41,6 +41,20 @@ services:
     ports:
       - "3000:3000"
 
+  # Run with: docker compose --profile adminer up
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "8080:8080"
+    profiles:
+      - adminer
+
   # Run with: docker compose run --rm test
   test:
     image: postgres:16-alpine
