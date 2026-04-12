@@ -8,6 +8,30 @@ describe('BookmarkCard', () => {
     vi.restoreAllMocks();
   });
 
+  it('clicking the edit (pencil) button calls the onEdit prop', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <BookmarkCard
+        title="My Video"
+        url="https://example.com/video"
+        tags={[]}
+        onEdit={onEdit}
+      />,
+    );
+    // The edit button has no aria-label; find it by excluding the play buttons.
+    const editButton = screen.getAllByRole('button').find(
+      (b) => b.getAttribute('aria-label') !== 'Open bookmark',
+    )!;
+    await user.click(editButton);
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a gradient placeholder div (no img element) when no thumbnail is provided', () => {
+    render(<BookmarkCard title="My Video" url="https://example.com/video" tags={[]} />);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
   it('Play buttons open the bookmark URL in a new tab', async () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     const user = userEvent.setup();
