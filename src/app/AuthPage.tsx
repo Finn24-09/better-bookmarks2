@@ -104,7 +104,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     try {
       const result = await signIn(data.email, data.password);
       const cryptoKey = await deriveKey(data.password, data.email);
-      await login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
+      login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
       onSuccess();
     } catch (err) {
       setApiError(err instanceof Error ? err.message : "Sign in failed");
@@ -172,7 +172,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
     try {
       const result = await signUp(data.email, data.password);
       const cryptoKey = await deriveKey(data.password, data.email);
-      await login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
+      login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
       onSuccess();
     } catch (err) {
       setApiError(err instanceof Error ? err.message : "Sign up failed");

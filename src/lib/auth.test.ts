@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { signIn, signUp } from './auth';
-import { ApiError } from './api';
+import { ApiError, setAuthToken } from './api';
 
 // Minimal fetch response factory.
 function mockFetch(status: number, body: unknown) {
@@ -14,7 +14,7 @@ function mockFetch(status: number, body: unknown) {
 describe('auth', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    localStorage.clear();
+    setAuthToken(null);
   });
 
   // -------------------------------------------------------------------------
@@ -81,7 +81,7 @@ describe('auth', () => {
   // -------------------------------------------------------------------------
   it('changePassword succeeds without throwing on 204', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 }));
-    localStorage.setItem('bb2_token', 'test-token');
+    setAuthToken('test-token');
 
     await expect(
       (await import('./auth')).changePassword('oldpass', 'newpass123'),
@@ -90,7 +90,7 @@ describe('auth', () => {
 
   it('changePassword with wrong current password throws ApiError with status 401', async () => {
     vi.stubGlobal('fetch', mockFetch(401, { message: 'Current password is incorrect' }));
-    localStorage.setItem('bb2_token', 'test-token');
+    setAuthToken('test-token');
 
     await expect(
       (await import('./auth')).changePassword('wrongcurrent', 'newpass123'),

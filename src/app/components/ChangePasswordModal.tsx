@@ -51,7 +51,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
       // decryptable in this session.
       if (email) {
         const newKey = await deriveKey(data.newPassword, email);
-        await updateKey(newKey);
+        updateKey(newKey);
       }
       toast.success("Password updated");
       handleClose();

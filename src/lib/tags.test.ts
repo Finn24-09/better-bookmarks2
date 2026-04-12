@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createTag, setBookmarkTags } from './tags';
 import { deriveKey, decrypt, computeHmac } from './crypto';
+import { setAuthToken } from './api';
 
 const USER_ID = 'user-uuid-123';
 
@@ -16,12 +17,12 @@ describe('tags', () => {
     key = await deriveKey('password123', 'test@example.com');
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    localStorage.setItem('bb2_token', 'test-token');
+    setAuthToken('test-token');
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    localStorage.clear();
+    setAuthToken(null);
   });
 
   // -------------------------------------------------------------------------

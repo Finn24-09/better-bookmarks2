@@ -19,7 +19,7 @@ export async function deriveKey(password: string, email: string): Promise<Crypto
     },
     keyMaterial,
     { name: 'AES-GCM', length: 256 },
-    true, // extractable so we can persist to sessionStorage
+    false, // non-extractable: key bytes never leave the Web Crypto engine
     ['encrypt', 'decrypt'],
   );
 }
@@ -42,21 +42,6 @@ export async function decrypt(key: CryptoKey, encoded: string): Promise<string> 
   const ciphertext = combined.slice(12);
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
   return new TextDecoder().decode(plaintext);
-}
-
-/** Export a CryptoKey to a base64 string for sessionStorage persistence. */
-export async function exportKey(key: CryptoKey): Promise<string> {
-  const raw = await crypto.subtle.exportKey('raw', key);
-  return btoa(String.fromCharCode(...new Uint8Array(raw)));
-}
-
-/** Import a base64 string back to a CryptoKey. */
-export async function importKey(encoded: string): Promise<CryptoKey> {
-  const raw = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, true, [
-    'encrypt',
-    'decrypt',
-  ]);
 }
 
 /**

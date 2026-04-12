@@ -38,8 +38,8 @@ BEGIN
       'role',  'app_user',
       'sub',   user_id::TEXT,
       'email', user_email,
-      -- Expire in 30 days
-      'exp',   EXTRACT(EPOCH FROM NOW() + INTERVAL '30 days')::BIGINT
+      -- Expire in 7 days
+      'exp',   EXTRACT(EPOCH FROM NOW() + INTERVAL '7 days')::BIGINT
     ),
     jwt_secret
   );

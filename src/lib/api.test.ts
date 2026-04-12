@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { apiFetch, ApiError } from './api';
+import { apiFetch, ApiError, setAuthToken } from './api';
 
 describe('apiFetch', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    localStorage.clear();
+    setAuthToken(null);
   });
 
   // -------------------------------------------------------------------------
@@ -50,10 +50,10 @@ describe('apiFetch', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Auth header injection
+  // Auth header injection (token lives in memory, set via setAuthToken)
   // -------------------------------------------------------------------------
-  it('injects Authorization: Bearer when token is in localStorage', async () => {
-    localStorage.setItem('bb2_token', 'test-jwt');
+  it('injects Authorization: Bearer when token is set via setAuthToken', async () => {
+    setAuthToken('test-jwt');
     const spy = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -67,7 +67,7 @@ describe('apiFetch', () => {
     expect(headers['Authorization']).toBe('Bearer test-jwt');
   });
 
-  it('does not inject Authorization header when no token', async () => {
+  it('does not inject Authorization header when no token is set', async () => {
     const spy = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,

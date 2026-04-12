@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveKey, encrypt, decrypt, exportKey, importKey, computeHmac } from './crypto';
+import { deriveKey, encrypt, decrypt, computeHmac } from './crypto';
 
 describe('crypto', () => {
   // -------------------------------------------------------------------------
@@ -28,24 +28,13 @@ describe('crypto', () => {
   });
 
   // -------------------------------------------------------------------------
-  // exportKey / importKey
+  // Non-extractable key
   // -------------------------------------------------------------------------
-  it('exportKey → importKey round-trip preserves decryption ability', async () => {
+  it('deriveKey returns a non-extractable key (raw bytes cannot be exported)', async () => {
     const key = await deriveKey('password123', 'test@example.com');
-    const plaintext = 'persistence test';
-    const encoded = await encrypt(key, plaintext);
-
-    const exported = await exportKey(key);
-    const imported = await importKey(exported);
-    const decoded = await decrypt(imported, encoded);
-    expect(decoded).toBe(plaintext);
-  });
-
-  it('exportKey produces a non-empty base64 string', async () => {
-    const key = await deriveKey('password123', 'test@example.com');
-    const exported = await exportKey(key);
-    expect(typeof exported).toBe('string');
-    expect(exported.length).toBeGreaterThan(0);
+    await expect(
+      crypto.subtle.exportKey('raw', key),
+    ).rejects.toThrow();
   });
 
   // -------------------------------------------------------------------------

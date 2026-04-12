@@ -8,20 +8,28 @@ export class ApiError extends Error {
   }
 }
 
+// In-memory token — intentionally never written to localStorage or sessionStorage.
+// Keeping the JWT only in memory means an XSS script cannot read it from storage
+// and replay it in a future session after the tab has closed.
+let _token: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  _token = token;
+}
+
 /**
- * Base fetch wrapper. Prepends /api, injects Bearer token from localStorage,
+ * Base fetch wrapper. Prepends /api, injects Bearer token from memory,
  * and converts non-OK responses to ApiError using PostgREST's error format.
  */
 export async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token = localStorage.getItem('bb2_token');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (_token) headers['Authorization'] = `Bearer ${_token}`;
 
   const response = await fetch(`/api${path}`, { ...options, headers });
 

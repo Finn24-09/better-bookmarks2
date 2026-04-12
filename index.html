@@ -6,6 +6,27 @@
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       <title>Better Bookmarks 2</title>
+
+      <!-- Security headers via meta tags -->
+      <!-- Prevents this page from being embedded in iframes (clickjacking protection) -->
+      <meta http-equiv="X-Frame-Options" content="DENY" />
+      <!-- Prevents MIME-type sniffing -->
+      <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+      <!-- Controls how much referrer info is sent with requests -->
+      <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin" />
+      <!--
+        Content Security Policy:
+        - default-src 'self'          — only load resources from the same origin by default
+        - script-src 'self'           — no inline scripts, no eval
+        - style-src 'self' 'unsafe-inline' — Tailwind requires inline styles at runtime
+        - img-src 'self' data: https: — allow images from same origin, data URIs, and HTTPS
+        - font-src 'self'             — fonts from same origin only
+        - connect-src 'self'          — XHR/fetch only to same origin (PostgREST is proxied via /api)
+        - frame-ancestors 'none'      — redundant with X-Frame-Options but belt-and-suspenders
+        - base-uri 'self'             — prevents base-tag injection attacks
+        - form-action 'self'          — form submissions only to same origin
+      -->
+      <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" />
     </head>
 
     <body>
@@ -13,4 +34,3 @@
       <script type="module" src="/src/main.tsx"></script>
     </body>
   </html>
-  
