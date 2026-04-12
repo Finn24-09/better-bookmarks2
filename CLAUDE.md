@@ -1,10 +1,46 @@
 # Better Bookmarks 2 — Claude Context
 
 ## Project Overview
-A React bookmark management app with a dark glassmorphic design. Currently in prototype/demo stage with static dummy data.
+A React bookmark management app with a dark glassmorphic design, backed by PostgreSQL + PostgREST with client-side E2E encryption.
 
 **Stack:** React 18 + TypeScript + Vite + Tailwind CSS v4 + lucide-react icons
 **Key deps:** react-hook-form, react-dnd, next-themes, sonner (toasts), motion (animations), Radix UI components
+**Test stack:** Vitest 4 + jsdom + @testing-library/react + @testing-library/jest-dom
+
+---
+
+## Test-Driven Development — MANDATORY
+
+This project is developed test-first. This is a hard rule, not a suggestion.
+
+**Before implementing any new feature or fixing any bug:**
+1. Write a failing test that captures the expected behaviour
+2. Run `npm test` and confirm it fails for the right reason
+3. Implement the minimum code to make it pass
+4. Run `npm test` again — all tests must be green before moving on
+
+**Test commands:**
+```bash
+npm test          # single run (CI / before committing)
+npm run test:watch  # watch mode during development
+```
+
+**Test file locations — mirror the source tree:**
+| Source | Test |
+|---|---|
+| `src/lib/foo.ts` | `src/lib/foo.test.ts` |
+| `src/app/hooks/useBar.ts` | `src/app/hooks/useBar.test.ts` |
+| `src/app/contexts/BazContext.tsx` | `src/app/contexts/BazContext.test.tsx` |
+
+**What to test (from the project plan):**
+- `src/lib/crypto.ts` — round-trip encrypt/decrypt, random IVs, exportKey/importKey, HMAC determinism
+- `src/lib/auth.ts` — fetch mocks for signIn success/failure, signUp duplicate email
+- `src/app/contexts/AuthContext.tsx` — login sets state + storage, logout clears both, session restore on remount
+- `src/lib/bookmarks.ts` — createBookmark sends `user_id` + encrypted fields; updateBookmark sends PATCH to correct URL
+- `src/lib/tags.ts` — createTag sends `user_id` + `name_enc` + correct `name_hmac`; setBookmarkTags diffs correctly
+- `src/app/hooks/useBookmarks.ts` — pagination params, loadMore offset, hasMore logic, client-side search/filter/AND logic
+
+**Why this matters:** The missing `user_id` bug in `createBookmark` and `createTag` that caused the RLS violation in production was not caught because these tests were not written first. Tests for request body content would have failed immediately and exposed the omission before any manual testing was needed.
 
 ---
 

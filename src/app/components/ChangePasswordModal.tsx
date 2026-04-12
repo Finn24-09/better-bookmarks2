@@ -1,4 +1,7 @@
+import { useState } from "react";
+import { useForm } from "react-hook-form";
 import { X } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogPortal,
@@ -7,15 +10,63 @@ import {
 } from "./ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
+import { changePassword } from "../../lib/auth";
+import { deriveKey } from "../../lib/crypto";
+import { useAuth } from "../contexts/AuthContext";
 
 interface ChangePasswordModalProps {
   open: boolean;
   onClose: () => void;
 }
 
+interface FormFields {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps) {
+  const { email, updateKey } = useAuth();
+  const [apiError, setApiError] = useState("");
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<FormFields>();
+
+  const handleClose = () => {
+    reset();
+    setApiError("");
+    onClose();
+  };
+
+  const onSubmit = async (data: FormFields) => {
+    setApiError("");
+    try {
+      await changePassword(data.currentPassword, data.newPassword);
+      // Re-derive encryption key with the new password so stored data stays
+      // decryptable in this session.
+      if (email) {
+        const newKey = await deriveKey(data.newPassword, email);
+        updateKey(newKey);
+      }
+      toast.success("Password updated");
+      handleClose();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : "Failed to change password");
+    }
+  };
+
+  const inputCls =
+    "w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300";
+  const errorInputCls =
+    "w-full bg-white/5 border border-red-500/60 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-red-500/80 transition-all duration-300";
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
       <DialogPortal>
         <DialogOverlay className="bg-black/60" />
         <DialogPrimitive.Content
@@ -41,47 +92,79 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
             </DialogClose>
           </div>
 
-          {/* Form Fields */}
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-sm text-white/70">Current Password</label>
-              <input
-                type="password"
-                placeholder="Enter current password…"
-                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
-              />
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-sm text-white/70">Current Password</label>
+                <input
+                  type="password"
+                  placeholder="Enter current password…"
+                  autoComplete="current-password"
+                  className={errors.currentPassword ? errorInputCls : inputCls}
+                  {...register("currentPassword", { required: "Required" })}
+                />
+                {errors.currentPassword && (
+                  <p className="text-xs text-red-400">{errors.currentPassword.message}</p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm text-white/70">New Password</label>
+                <input
+                  type="password"
+                  placeholder="Enter new password…"
+                  autoComplete="new-password"
+                  className={errors.newPassword ? errorInputCls : inputCls}
+                  {...register("newPassword", {
+                    required: "Required",
+                    minLength: { value: 8, message: "At least 8 characters" },
+                  })}
+                />
+                {errors.newPassword && (
+                  <p className="text-xs text-red-400">{errors.newPassword.message}</p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm text-white/70">Confirm New Password</label>
+                <input
+                  type="password"
+                  placeholder="Retype new password…"
+                  autoComplete="new-password"
+                  className={errors.confirmPassword ? errorInputCls : inputCls}
+                  {...register("confirmPassword", {
+                    required: "Required",
+                    validate: (v) => v === watch("newPassword") || "Passwords do not match",
+                  })}
+                />
+                {errors.confirmPassword && (
+                  <p className="text-xs text-red-400">{errors.confirmPassword.message}</p>
+                )}
+              </div>
+
+              {apiError && <p className="text-sm text-red-400">{apiError}</p>}
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-sm text-white/70">New Password</label>
-              <input
-                type="password"
-                placeholder="Enter new password…"
-                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm text-white/70">Confirm New Password</label>
-              <input
-                type="password"
-                placeholder="Retype new password…"
-                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
-              />
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-end gap-3 mt-6">
-            <DialogClose asChild>
-              <button className="px-6 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-full hover:bg-white/10 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 text-sm">
-                Cancel
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <DialogClose asChild>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="px-6 py-2.5 bg-white/5 border border-white/10 text-white/70 rounded-full hover:bg-white/10 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 text-sm"
+                >
+                  Cancel
+                </button>
+              </DialogClose>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-6 py-2.5 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full hover:scale-105 active:scale-95 transition-all duration-300 text-sm shadow-lg shadow-purple-500/30 disabled:opacity-60 disabled:pointer-events-none"
+              >
+                {isSubmitting ? "Saving…" : "Save Password"}
               </button>
-            </DialogClose>
-            <button className="px-6 py-2.5 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full hover:scale-105 active:scale-95 transition-all duration-300 text-sm shadow-lg shadow-purple-500/30">
-              Save Password
-            </button>
-          </div>
+            </div>
+          </form>
         </DialogPrimitive.Content>
       </DialogPortal>
     </Dialog>

@@ -1,36 +1,50 @@
-import { useState } from "react";
+import { forwardRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { useForm } from "react-hook-form";
 import { motion, AnimatePresence } from "motion/react";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { FloatingFooter } from "./components/FloatingFooter";
 import { cn } from "./components/ui/utils";
+import { signIn, signUp } from "../lib/auth";
+import { deriveKey } from "../lib/crypto";
+import { useAuth } from "./contexts/AuthContext";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-interface InputFieldProps {
-  type: string;
-  placeholder: string;
+interface InputFieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   icon: React.ElementType;
   rightSlot?: React.ReactNode;
+  error?: string;
 }
 
-function InputField({ type, placeholder, icon: Icon, rightSlot }: InputFieldProps) {
-  return (
-    <div className="relative">
-      <Icon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
-      <input
-        type={type}
-        placeholder={placeholder}
-        className="w-full pl-11 pr-11 py-3 bg-white/5 border border-white/10 rounded-2xl text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
-      />
-      {rightSlot && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2">{rightSlot}</div>
-      )}
+const InputField = forwardRef<HTMLInputElement, InputFieldProps>(
+  ({ icon: Icon, rightSlot, error, className, ...rest }, ref) => (
+    <div className="space-y-1">
+      <div className="relative">
+        <Icon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
+        <input
+          ref={ref}
+          className={cn(
+            "w-full pl-11 pr-11 py-3 bg-white/5 border rounded-2xl text-white placeholder:text-white/40",
+            "focus:outline-none focus:bg-white/10 transition-all duration-300",
+            error
+              ? "border-red-500/60 focus:border-red-500/80"
+              : "border-white/10 focus:border-white/20",
+            className,
+          )}
+          {...rest}
+        />
+        {rightSlot && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2">{rightSlot}</div>
+        )}
+      </div>
+      {error && <p className="text-xs text-red-400 pl-1">{error}</p>}
     </div>
-  );
-}
+  ),
+);
+InputField.displayName = "InputField";
 
 interface EyeToggleProps {
   show: boolean;
@@ -50,35 +64,74 @@ function EyeToggle({ show, onToggle }: EyeToggleProps) {
 }
 
 const primaryBtn =
-  "w-full py-3 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full text-sm font-medium hover:scale-[1.02] hover:shadow-lg hover:shadow-purple-500/30 active:scale-[0.98] transition-all duration-300 shadow-md shadow-purple-500/20";
+  "w-full py-3 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full text-sm font-medium hover:scale-[1.02] hover:shadow-lg hover:shadow-purple-500/30 active:scale-[0.98] transition-all duration-300 shadow-md shadow-purple-500/20 disabled:opacity-60 disabled:pointer-events-none";
 
 const ghostBtn =
   "px-6 py-2.5 border border-white/40 text-white rounded-full hover:bg-white/10 hover:border-white/60 active:scale-95 transition-all duration-300 text-sm";
 
 // ---------------------------------------------------------------------------
-// Main component
+// Form types
 // ---------------------------------------------------------------------------
 
-export function AuthPage() {
-  const navigate = useNavigate();
-  const [isLogin, setIsLogin] = useState(true);
+interface LoginFields {
+  email: string;
+  password: string;
+}
+
+interface RegisterFields {
+  email: string;
+  password: string;
+  confirmPassword: string;
+}
+
+// ---------------------------------------------------------------------------
+// Login form
+// ---------------------------------------------------------------------------
+
+function LoginForm({ onSuccess }: { onSuccess: () => void }) {
+  const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
-  const [showRegPassword, setShowRegPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [apiError, setApiError] = useState("");
 
-  // ---------------------------------------------------------------------------
-  // Form content blocks (shared between desktop and mobile)
-  // ---------------------------------------------------------------------------
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginFields>();
 
-  const loginFields = (
-    <div className="space-y-3">
-      <InputField type="email" placeholder="Email address" icon={Mail} />
+  const onSubmit = async (data: LoginFields) => {
+    setApiError("");
+    try {
+      const result = await signIn(data.email, data.password);
+      const cryptoKey = await deriveKey(data.password, data.email);
+      login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
+      onSuccess();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : "Sign in failed");
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+      <InputField
+        type="email"
+        placeholder="Email address"
+        icon={Mail}
+        autoComplete="email"
+        error={errors.email?.message}
+        {...register("email", { required: "Email is required" })}
+      />
       <div className="space-y-1">
         <InputField
           type={showPassword ? "text" : "password"}
           placeholder="Password"
           icon={Lock}
-          rightSlot={<EyeToggle show={showPassword} onToggle={() => setShowPassword((s) => !s)} />}
+          autoComplete="current-password"
+          error={errors.password?.message}
+          rightSlot={
+            <EyeToggle show={showPassword} onToggle={() => setShowPassword((s) => !s)} />
+          }
+          {...register("password", { required: "Password is required" })}
         />
         <div className="flex justify-end">
           <button
@@ -89,35 +142,98 @@ export function AuthPage() {
           </button>
         </div>
       </div>
-    </div>
+      {apiError && <p className="text-xs text-red-400">{apiError}</p>}
+      <button type="submit" disabled={isSubmitting} className={primaryBtn}>
+        {isSubmitting ? "Signing in…" : "Sign In"}
+      </button>
+    </form>
   );
+}
 
-  const registerFields = (
-    <div className="space-y-3">
-      <InputField type="email" placeholder="Email address" icon={Mail} />
+// ---------------------------------------------------------------------------
+// Register form
+// ---------------------------------------------------------------------------
+
+function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
+  const { login } = useAuth();
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [apiError, setApiError] = useState("");
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterFields>();
+
+  const onSubmit = async (data: RegisterFields) => {
+    setApiError("");
+    try {
+      const result = await signUp(data.email, data.password);
+      const cryptoKey = await deriveKey(data.password, data.email);
+      login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
+      onSuccess();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : "Sign up failed");
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
       <InputField
-        type={showRegPassword ? "text" : "password"}
+        type="email"
+        placeholder="Email address"
+        icon={Mail}
+        autoComplete="email"
+        error={errors.email?.message}
+        {...register("email", { required: "Email is required" })}
+      />
+      <InputField
+        type={showPassword ? "text" : "password"}
         placeholder="Password"
         icon={Lock}
-        rightSlot={<EyeToggle show={showRegPassword} onToggle={() => setShowRegPassword((s) => !s)} />}
+        autoComplete="new-password"
+        error={errors.password?.message}
+        rightSlot={
+          <EyeToggle show={showPassword} onToggle={() => setShowPassword((s) => !s)} />
+        }
+        {...register("password", {
+          required: "Password is required",
+          minLength: { value: 8, message: "At least 8 characters" },
+        })}
       />
       <InputField
-        type={showConfirmPassword ? "text" : "password"}
+        type={showConfirm ? "text" : "password"}
         placeholder="Confirm password"
         icon={Lock}
+        autoComplete="new-password"
+        error={errors.confirmPassword?.message}
         rightSlot={
-          <EyeToggle
-            show={showConfirmPassword}
-            onToggle={() => setShowConfirmPassword((s) => !s)}
-          />
+          <EyeToggle show={showConfirm} onToggle={() => setShowConfirm((s) => !s)} />
         }
+        {...register("confirmPassword", {
+          required: "Please confirm your password",
+          validate: (v) => v === watch("password") || "Passwords do not match",
+        })}
       />
-    </div>
+      {apiError && <p className="text-xs text-red-400">{apiError}</p>}
+      <button type="submit" disabled={isSubmitting} className={primaryBtn}>
+        {isSubmitting ? "Creating account…" : "Create Account"}
+      </button>
+    </form>
   );
+}
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export function AuthPage() {
+  const navigate = useNavigate();
+  const [isLogin, setIsLogin] = useState(true);
+
+  const handleSuccess = () => navigate("/");
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950 flex items-center justify-center p-6">
@@ -134,8 +250,7 @@ export function AuthPage() {
               <h2 className="text-2xl font-medium text-white mb-1">Sign In</h2>
               <p className="text-sm text-white/50">Welcome back</p>
             </div>
-            {loginFields}
-            <button type="button" className={primaryBtn}>Sign In</button>
+            <LoginForm onSuccess={handleSuccess} />
             <div className="flex items-center gap-3">
               <div className="flex-1 h-px bg-white/10" />
               <span className="text-xs text-white/30">or</span>
@@ -158,8 +273,7 @@ export function AuthPage() {
               <h2 className="text-2xl font-medium text-white mb-1">Create Account</h2>
               <p className="text-sm text-white/50">Start saving your bookmarks</p>
             </div>
-            {registerFields}
-            <button type="button" className={primaryBtn}>Create Account</button>
+            <RegisterForm onSuccess={handleSuccess} />
           </div>
         </div>
 
@@ -176,11 +290,11 @@ export function AuthPage() {
               "absolute inset-y-0 w-8 pointer-events-none",
               isLogin
                 ? "left-0 bg-gradient-to-r from-purple-900/60 to-transparent"
-                : "right-0 bg-gradient-to-l from-purple-900/60 to-transparent"
+                : "right-0 bg-gradient-to-l from-purple-900/60 to-transparent",
             )}
           />
 
-          {/* Brand mark — always visible */}
+          {/* Brand mark */}
           <div className="mb-8 text-center">
             <div className="w-12 h-12 flex items-center justify-center mx-auto mb-3">
               <img src="/favicon.svg" alt="" className="w-10 h-10" />
@@ -190,7 +304,7 @@ export function AuthPage() {
             </p>
           </div>
 
-          {/* Toggle text + button — crossfades on switch */}
+          {/* Toggle text + button */}
           <AnimatePresence mode="wait">
             {isLogin ? (
               <motion.div
@@ -248,7 +362,6 @@ export function AuthPage() {
           transition={{ duration: 0.25, ease: "easeInOut" }}
           className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden p-6 space-y-6 shadow-2xl shadow-purple-500/10"
         >
-
           {/* App name */}
           <motion.div layout="position" className="text-center">
             <div className="w-10 h-10 flex items-center justify-center mx-auto mb-3">
@@ -259,7 +372,10 @@ export function AuthPage() {
           </motion.div>
 
           {/* Toggle tabs */}
-          <motion.div layout="position" className="flex bg-white/5 border border-white/10 rounded-full p-1 gap-1">
+          <motion.div
+            layout="position"
+            className="flex bg-white/5 border border-white/10 rounded-full p-1 gap-1"
+          >
             <button
               type="button"
               onClick={() => setIsLogin(true)}
@@ -267,7 +383,7 @@ export function AuthPage() {
                 "flex-1 py-2 rounded-full text-sm transition-all duration-300",
                 isLogin
                   ? "bg-gradient-to-br from-purple-600 to-purple-800 text-white shadow-md shadow-purple-500/20"
-                  : "text-white/50 hover:text-white/80"
+                  : "text-white/50 hover:text-white/80",
               )}
             >
               Sign In
@@ -279,54 +395,52 @@ export function AuthPage() {
                 "flex-1 py-2 rounded-full text-sm transition-all duration-300",
                 !isLogin
                   ? "bg-gradient-to-br from-purple-600 to-purple-800 text-white shadow-md shadow-purple-500/20"
-                  : "text-white/50 hover:text-white/80"
+                  : "text-white/50 hover:text-white/80",
               )}
             >
               Sign Up
             </button>
           </motion.div>
 
-          {/* Animated form — fixed-height wrapper keeps card size stable across login/signup */}
+          {/* Animated form */}
           <div className="min-h-72">
-          <AnimatePresence mode="wait" initial={false}>
-            {isLogin ? (
-              <motion.div
-                key="mobile-login"
-                initial={{ opacity: 0, x: -16 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 16 }}
-                transition={{ duration: 0.2, ease: "easeInOut" }}
-                className="space-y-4"
-              >
-                {loginFields}
-                <button type="button" className={primaryBtn}>Sign In</button>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-px bg-white/10" />
-                  <span className="text-xs text-white/30">or</span>
-                  <div className="flex-1 h-px bg-white/10" />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigate("/")}
-                  className="w-full py-3 bg-white/5 border border-white/10 text-white/70 rounded-full text-sm hover:bg-white/10 hover:text-white hover:border-white/20 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300"
+            <AnimatePresence mode="wait" initial={false}>
+              {isLogin ? (
+                <motion.div
+                  key="mobile-login"
+                  initial={{ opacity: 0, x: -16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 16 }}
+                  transition={{ duration: 0.2, ease: "easeInOut" }}
+                  className="space-y-4"
                 >
-                  Continue as guest →
-                </button>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="mobile-register"
-                initial={{ opacity: 0, x: 16 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -16 }}
-                transition={{ duration: 0.2, ease: "easeInOut" }}
-                className="space-y-4"
-              >
-                {registerFields}
-                <button type="button" className={primaryBtn}>Create Account</button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <LoginForm onSuccess={handleSuccess} />
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px bg-white/10" />
+                    <span className="text-xs text-white/30">or</span>
+                    <div className="flex-1 h-px bg-white/10" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/")}
+                    className="w-full py-3 bg-white/5 border border-white/10 text-white/70 rounded-full text-sm hover:bg-white/10 hover:text-white hover:border-white/20 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300"
+                  >
+                    Continue as guest →
+                  </button>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="mobile-register"
+                  initial={{ opacity: 0, x: 16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -16 }}
+                  transition={{ duration: 0.2, ease: "easeInOut" }}
+                  className="space-y-4"
+                >
+                  <RegisterForm onSuccess={handleSuccess} />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.div>
       </div>

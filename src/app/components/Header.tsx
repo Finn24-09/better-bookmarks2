@@ -7,6 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "./ui/dropdown-menu";
+import { useAuth } from "../contexts/AuthContext";
 
 interface HeaderProps {
   onChangePassword: () => void;
@@ -15,6 +16,12 @@ interface HeaderProps {
 
 export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
   const navigate = useNavigate();
+  const { email, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login", { replace: true });
+  };
 
   return (
     <div className="sticky top-0 z-50 py-4 md:py-5 bg-white/5 backdrop-blur-xl border-b border-white/10">
@@ -36,15 +43,14 @@ export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
             sideOffset={8}
             className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl shadow-purple-500/20 p-1.5 min-w-[220px]"
           >
-            {/* Email — non-interactive display */}
+            {/* Email display */}
             <div className="flex items-center gap-3 px-3 py-2.5 text-sm text-white/50 cursor-default select-none">
               <Mail className="w-4 h-4 shrink-0" />
-              <span className="truncate">user@example.com</span>
+              <span className="truncate">{email ?? "—"}</span>
             </div>
 
             <DropdownMenuSeparator className="bg-white/10 my-1" />
 
-            {/* Change Password */}
             <DropdownMenuItem
               onSelect={onChangePassword}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:text-white focus:text-white focus:bg-white/10 cursor-pointer transition-all duration-300"
@@ -55,9 +61,8 @@ export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
 
             <DropdownMenuSeparator className="bg-white/10 my-1" />
 
-            {/* Logout */}
             <DropdownMenuItem
-              onSelect={() => navigate("/login")}
+              onSelect={handleLogout}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:text-white focus:text-white focus:bg-white/10 cursor-pointer transition-all duration-300"
             >
               <LogOut className="w-4 h-4 shrink-0" />
@@ -66,7 +71,6 @@ export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
 
             <DropdownMenuSeparator className="bg-white/10 my-1" />
 
-            {/* Delete Account */}
             <DropdownMenuItem
               onSelect={onDeleteAccount}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-400 hover:text-red-300 focus:text-red-300 focus:bg-red-500/10 cursor-pointer transition-all duration-300"
