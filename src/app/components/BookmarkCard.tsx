@@ -33,14 +33,22 @@ export function BookmarkCard({ thumbnail, title, url, tags, onEdit }: BookmarkCa
 
         {/* Play Icon Overlay - Center on desktop hover */}
         <div className="absolute inset-0 items-center justify-center hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-          <div className="w-16 h-16 bg-white/10 border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 transition-all duration-300 pointer-events-auto">
+          <button
+            aria-label="Open bookmark"
+            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+            className="w-16 h-16 bg-white/10 border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 transition-all duration-300 pointer-events-auto"
+          >
             <Play className="w-8 h-8 text-white fill-white ml-1" />
-          </div>
+          </button>
         </div>
 
         {/* Play Icon - Always visible on mobile, bottom-right */}
         <div className="absolute bottom-3 right-3 md:hidden">
-          <button className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center active:scale-95 transition-transform duration-300">
+          <button
+            aria-label="Open bookmark"
+            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+            className="w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center active:scale-95 transition-transform duration-300"
+          >
             <Play className="w-6 h-6 text-white fill-white ml-0.5" />
           </button>
         </div>
