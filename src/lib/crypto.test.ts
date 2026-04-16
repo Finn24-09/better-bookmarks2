@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveKey, encrypt, decrypt, computeHmac } from './crypto';
+import { deriveKey, encrypt, decrypt, computeHmac, encryptBinary, decryptBinary } from './crypto';
 
 describe('crypto', () => {
   // -------------------------------------------------------------------------
@@ -56,5 +56,42 @@ describe('crypto', () => {
     const h1 = await computeHmac('user-a', 'same-tag');
     const h2 = await computeHmac('user-b', 'same-tag');
     expect(h1).not.toBe(h2);
+  });
+
+  // -------------------------------------------------------------------------
+  // encryptBinary / decryptBinary
+  // -------------------------------------------------------------------------
+  it('encryptBinary → decryptBinary round-trip returns the original bytes', async () => {
+    const key = await deriveKey('password123', 'test@example.com');
+    const original = new Uint8Array([1, 2, 3, 255, 0, 128, 64]);
+    const encoded = await encryptBinary(key, original);
+    const decoded = await decryptBinary(key, encoded);
+    expect(decoded).toEqual(original);
+  });
+
+  it('encryptBinary produces a base64 string (not the raw bytes)', async () => {
+    const key = await deriveKey('password123', 'test@example.com');
+    const encoded = await encryptBinary(key, new Uint8Array([10, 20, 30]));
+    expect(typeof encoded).toBe('string');
+    // base64 characters only
+    expect(encoded).toMatch(/^[A-Za-z0-9+/]+=*$/);
+  });
+
+  it('encryptBinary with the same input produces different ciphertext each call (random IV)', async () => {
+    const key = await deriveKey('password123', 'test@example.com');
+    const data = new Uint8Array(32).fill(0xab);
+    const enc1 = await encryptBinary(key, data);
+    const enc2 = await encryptBinary(key, data);
+    expect(enc1).not.toBe(enc2);
+  });
+
+  it('encryptBinary handles a large payload (>8 KB) without stack overflow', async () => {
+    const key = await deriveKey('password123', 'test@example.com');
+    // 100 KB of repeating data — exercises the chunked bytesToBase64 helper
+    // (crypto.getRandomValues is capped at 64 KB, so we use fill instead)
+    const large = new Uint8Array(100 * 1024).fill(0xab);
+    const encoded = await encryptBinary(key, large);
+    const decoded = await decryptBinary(key, encoded);
+    expect(decoded).toEqual(large);
   });
 });

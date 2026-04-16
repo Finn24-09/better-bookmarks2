@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getBookmarks, Bookmark } from '../../lib/bookmarks';
 import { getTags, Tag } from '../../lib/tags';
+import { fetchThumbnailObjectUrl } from '../../lib/thumbnails';
 
 const PAGE_SIZE = 20;
 
@@ -36,6 +37,32 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
   // Ref to cancel stale fetches when options change.
   const fetchIdRef = useRef(0);
 
+  // Cache of thumbnailFileId → blob object URL so we don't re-fetch on every render.
+  const thumbCache = useRef<Map<string, string>>(new Map());
+
+  // Revoke all cached blob URLs when the hook unmounts to avoid memory leaks.
+  useEffect(() => {
+    const cache = thumbCache.current;
+    return () => cache.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+
+  // Resolve thumbnailFileId → blob URL for each bookmark that has a file upload.
+  const resolveThumbnails = useCallback(
+    async (bms: Bookmark[], key: CryptoKey): Promise<Bookmark[]> => {
+      return Promise.all(
+        bms.map(async (bm) => {
+          if (!bm.thumbnailFileId) return bm;
+          if (!thumbCache.current.has(bm.thumbnailFileId)) {
+            const url = await fetchThumbnailObjectUrl(bm.thumbnailFileId, key);
+            thumbCache.current.set(bm.thumbnailFileId, url);
+          }
+          return { ...bm, thumbnailUrl: thumbCache.current.get(bm.thumbnailFileId)! };
+        }),
+      );
+    },
+    [],
+  );
+
   const loadTags = useCallback(async (key: CryptoKey) => {
     try {
       const t = await getTags(key);
@@ -58,9 +85,11 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
           loadTags(key),
         ]);
         if (id !== fetchIdRef.current) return; // stale
-        setAllBookmarks(bms);
-        setOffset(fetchAll ? bms.length : PAGE_SIZE);
-        setHasMore(fetchAll ? false : bms.length === PAGE_SIZE);
+        const resolved = await resolveThumbnails(bms, key);
+        if (id !== fetchIdRef.current) return; // stale after thumbnail fetch
+        setAllBookmarks(resolved);
+        setOffset(fetchAll ? resolved.length : PAGE_SIZE);
+        setHasMore(fetchAll ? false : resolved.length === PAGE_SIZE);
         setFetchedAll(fetchAll);
       } catch {
         // leave previous data in place
@@ -68,7 +97,7 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
         if (id === fetchIdRef.current) setIsLoading(false);
       }
     },
-    [loadTags],
+    [loadTags, resolveThumbnails],
   );
 
   // Re-run when search/filter mode changes.
@@ -96,15 +125,16 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
     setIsLoading(true);
     try {
       const more = await getBookmarks(cryptoKey, { limit: PAGE_SIZE, offset });
-      setAllBookmarks((prev) => [...prev, ...more]);
-      setOffset((o) => o + more.length);
-      setHasMore(more.length === PAGE_SIZE);
+      const resolved = await resolveThumbnails(more, cryptoKey);
+      setAllBookmarks((prev) => [...prev, ...resolved]);
+      setOffset((o) => o + resolved.length);
+      setHasMore(resolved.length === PAGE_SIZE);
     } catch {
       // leave state as-is
     } finally {
       setIsLoading(false);
     }
-  }, [cryptoKey, isLoading, hasMore, isFiltered, offset]);
+  }, [cryptoKey, isLoading, hasMore, isFiltered, offset, resolveThumbnails]);
 
   // Client-side filtering (search + tag).
   const bookmarks = isFiltered

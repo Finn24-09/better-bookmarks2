@@ -18,7 +18,7 @@ SELECT set_config('app.settings.jwt_secret', 'test-secret-must-be-at-least-32-ch
 
 BEGIN;
 
-SELECT plan(15);
+SELECT plan(21);
 
 -- Helper: catch an expected exception and compare the message.
 CREATE OR REPLACE FUNCTION _expect_error(sql TEXT, expected_msg TEXT, description TEXT)
@@ -176,6 +176,99 @@ SELECT api.delete_account('password123');
 SELECT ok(
   NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'carol@test.com'),
   'delete_account: removes user and cascades to all data'
+);
+
+-- ===========================================================================
+-- thumbnail_images: table existence, RLS, FK, cascade
+-- ===========================================================================
+
+-- --- Test 16: thumbnail_images table exists ---
+SELECT ok(
+  (SELECT count(*) = 1
+     FROM information_schema.tables
+    WHERE table_schema = 'api'
+      AND table_name   = 'thumbnail_images'),
+  'thumbnail_images table exists in api schema'
+);
+
+-- --- Test 17: thumbnail_file_id column exists on bookmarks ---
+SELECT ok(
+  (SELECT count(*) = 1
+     FROM information_schema.columns
+    WHERE table_schema = 'api'
+      AND table_name   = 'bookmarks'
+      AND column_name  = 'thumbnail_file_id'),
+  'bookmarks.thumbnail_file_id column exists'
+);
+
+-- Setup: insert a thumbnail_images row for Alice as superuser.
+INSERT INTO api.thumbnail_images (user_id, data_enc, original_name_enc)
+SELECT id, 'fake_data_enc', 'fake_name_enc'
+  FROM auth.users WHERE email = 'alice@test.com';
+
+-- --- Test 18: Bob cannot SELECT Alice's thumbnail image ---
+SELECT set_config('request.jwt.claims',
+  json_build_object(
+    'sub',  (SELECT id::TEXT FROM auth.users WHERE email = 'bob@test.com'),
+    'role', 'app_user'
+  )::TEXT, true);
+
+SET LOCAL ROLE app_user;
+SELECT ok(
+  (SELECT count(*) = 0 FROM api.thumbnail_images),
+  'RLS: Bob cannot see Alice''s thumbnail images'
+);
+RESET ROLE;
+
+-- --- Test 19: Alice can SELECT her own thumbnail image ---
+SELECT set_config('request.jwt.claims',
+  json_build_object(
+    'sub',  (SELECT id::TEXT FROM auth.users WHERE email = 'alice@test.com'),
+    'role', 'app_user'
+  )::TEXT, true);
+
+SET LOCAL ROLE app_user;
+SELECT ok(
+  (SELECT count(*) = 1 FROM api.thumbnail_images),
+  'RLS: Alice can see her own thumbnail image'
+);
+RESET ROLE;
+
+-- --- Test 20: Bob cannot INSERT a thumbnail image owned by Alice ---
+SELECT _expect_error(
+  format(
+    $q$ SET LOCAL ROLE app_user;
+        SET LOCAL request.jwt.claims = %L;
+        INSERT INTO api.thumbnail_images (user_id, data_enc, original_name_enc)
+        VALUES (%L::UUID, 'bad_data', 'bad_name') $q$,
+    json_build_object(
+      'sub',  (SELECT id::TEXT FROM auth.users WHERE email = 'bob@test.com'),
+      'role', 'app_user'
+    )::TEXT,
+    (SELECT id FROM auth.users WHERE email = 'alice@test.com')
+  ),
+  'new row violates row-level security policy for table "thumbnail_images"',
+  'RLS: Bob cannot INSERT thumbnail image with Alice''s user_id'
+);
+
+-- --- Test 21: Deleting Alice's account cascades to thumbnail_images ---
+-- Alice's account and thumbnail image were inserted above; delete_account
+-- removes her from auth.users, which cascades to thumbnail_images.
+SELECT set_config('request.jwt.claims',
+  json_build_object(
+    'sub',  (SELECT id::TEXT FROM auth.users WHERE email = 'alice@test.com'),
+    'role', 'app_user'
+  )::TEXT, true);
+
+SELECT api.delete_account('password123');
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1 FROM api.thumbnail_images ti
+    JOIN auth.users u ON u.id = ti.user_id
+    WHERE u.email = 'alice@test.com'
+  ),
+  'cascade: deleting user removes their thumbnail_images rows'
 );
 
 SELECT * FROM finish();

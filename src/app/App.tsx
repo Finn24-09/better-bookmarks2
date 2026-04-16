@@ -155,6 +155,8 @@ export default function App() {
                 title: editingBookmark.title,
                 url: editingBookmark.url,
                 thumbnailUrl: editingBookmark.thumbnailUrl,
+                thumbnailFileId: editingBookmark.thumbnailFileId,
+                thumbnailOriginalName: editingBookmark.thumbnailOriginalName,
                 tagIds: editingBookmark.tagIds,
               }
             : null

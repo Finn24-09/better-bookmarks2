@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BookmarkFormModal } from './BookmarkFormModal';
 import type { Tag } from '../../lib/tags';
@@ -25,8 +25,14 @@ vi.mock('../../lib/tags', () => ({
   setBookmarkTags: vi.fn(),
 }));
 
+vi.mock('../../lib/thumbnails', () => ({
+  uploadThumbnail: vi.fn(),
+  deleteThumbnailImage: vi.fn(),
+}));
+
 import { createBookmark, updateBookmark, deleteBookmark } from '../../lib/bookmarks';
 import { setBookmarkTags } from '../../lib/tags';
+import { uploadThumbnail, deleteThumbnailImage } from '../../lib/thumbnails';
 
 // ---------------------------------------------------------------------------
 
@@ -40,6 +46,18 @@ const EDIT_DATA = {
   title: 'Existing Title',
   url: 'https://existing.com',
   thumbnailUrl: null,
+  thumbnailFileId: null,
+  thumbnailOriginalName: null,
+  tagIds: [] as string[],
+};
+
+const EDIT_DATA_WITH_FILE = {
+  id: 'bm-2',
+  title: 'File Thumb Bookmark',
+  url: 'https://example.com',
+  thumbnailUrl: null,
+  thumbnailFileId: 'img-existing',
+  thumbnailOriginalName: 'existing-photo.jpg',
   tagIds: [] as string[],
 };
 
@@ -47,6 +65,7 @@ describe('BookmarkFormModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(setBookmarkTags).mockResolvedValue(undefined as never);
+    vi.mocked(deleteThumbnailImage).mockResolvedValue(undefined as never);
   });
 
   function renderAdd(props: { onSave?: () => void; onClose?: () => void } = {}) {
@@ -224,5 +243,150 @@ describe('BookmarkFormModal', () => {
     await waitFor(() =>
       expect(screen.getByText('Server error')).toBeInTheDocument(),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Thumbnail file upload
+  // -------------------------------------------------------------------------
+
+  it('shows an "Upload image" button in the thumbnail section', () => {
+    renderAdd();
+    expect(screen.getByRole('button', { name: /upload image/i })).toBeInTheDocument();
+  });
+
+  it('after uploading a file, shows the filename chip and hides the URL input', async () => {
+    vi.mocked(uploadThumbnail).mockResolvedValue('img-new');
+    const user = userEvent.setup();
+    renderAdd();
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['fake'], 'photo.jpg', { type: 'image/jpeg' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByText('photo.jpg')).toBeInTheDocument();
+      // Thumbnail URL input should be gone (only the main bookmark URL remains)
+      expect(screen.queryAllByPlaceholderText('https://\u2026')).toHaveLength(1);
+    });
+  });
+
+  it('clicking Remove deletes the uploaded file and shows the URL input again', async () => {
+    vi.mocked(uploadThumbnail).mockResolvedValue('img-new');
+    const user = userEvent.setup();
+    renderAdd();
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['fake'], 'photo.jpg', { type: 'image/jpeg' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText('photo.jpg')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /remove/i }));
+
+    await waitFor(() => {
+      expect(deleteThumbnailImage).toHaveBeenCalledWith('img-new');
+      expect(screen.queryAllByPlaceholderText('https://\u2026')).toHaveLength(2);
+    });
+  });
+
+  it('when initialData has thumbnailFileId, shows the filename chip instead of URL input', () => {
+    render(
+      <BookmarkFormModal
+        open={true}
+        onClose={vi.fn()}
+        initialData={EDIT_DATA_WITH_FILE}
+        availableTags={AVAILABLE_TAGS}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('existing-photo.jpg')).toBeInTheDocument();
+    expect(screen.queryAllByPlaceholderText('https://\u2026')).toHaveLength(1);
+  });
+
+  it('saving in file mode passes thumbnailFileId and null thumbnailUrl to createBookmark', async () => {
+    vi.mocked(uploadThumbnail).mockResolvedValue('img-uploaded');
+    vi.mocked(createBookmark).mockResolvedValue({ id: 'new-bm' } as never);
+    const user = userEvent.setup();
+    renderAdd();
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['fake'], 'photo.jpg', { type: 'image/jpeg' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText('photo.jpg')).toBeInTheDocument());
+
+    await user.type(screen.getByPlaceholderText('Enter bookmark title\u2026'), 'New Title');
+    await user.type(screen.getAllByPlaceholderText('https://\u2026')[0], 'https://example.com');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(createBookmark).toHaveBeenCalledWith(
+        expect.objectContaining({ thumbnailFileId: 'img-uploaded', thumbnailUrl: null }),
+        expect.any(Object),
+        'user-1',
+      );
+    });
+  });
+
+  it('closing the modal after a new upload calls deleteThumbnailImage (cleanup)', async () => {
+    vi.mocked(uploadThumbnail).mockResolvedValue('img-cleanup');
+    const user = userEvent.setup();
+    renderAdd();
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['fake'], 'photo.jpg', { type: 'image/jpeg' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText('photo.jpg')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+    await waitFor(() => {
+      expect(deleteThumbnailImage).toHaveBeenCalledWith('img-cleanup');
+    });
+  });
+
+  it('uploading a replacement file deletes the previously uploaded pending file', async () => {
+    vi.mocked(uploadThumbnail)
+      .mockResolvedValueOnce('img-first')
+      .mockResolvedValueOnce('img-second');
+    const user = userEvent.setup();
+    renderAdd();
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    // First upload
+    fireEvent.change(fileInput, { target: { files: [new File(['f1'], 'photo1.jpg', { type: 'image/jpeg' })] } });
+    await waitFor(() => expect(screen.getByText('photo1.jpg')).toBeInTheDocument());
+
+    expect(screen.getByRole('button', { name: /replace/i })).toBeInTheDocument();
+
+    // Second upload (replace)
+    fireEvent.change(fileInput, { target: { files: [new File(['f2'], 'photo2.jpg', { type: 'image/jpeg' })] } });
+
+    await waitFor(() => {
+      expect(deleteThumbnailImage).toHaveBeenCalledWith('img-first');
+      expect(screen.getByText('photo2.jpg')).toBeInTheDocument();
+    });
+  });
+
+  it('deleting a bookmark that has a thumbnailFileId also deletes the image', async () => {
+    vi.mocked(deleteBookmark).mockResolvedValue(undefined as never);
+    const user = userEvent.setup();
+    render(
+      <BookmarkFormModal
+        open={true}
+        onClose={vi.fn()}
+        initialData={EDIT_DATA_WITH_FILE}
+        availableTags={AVAILABLE_TAGS}
+        onSave={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+
+    await waitFor(() => {
+      expect(deleteBookmark).toHaveBeenCalledWith('bm-2');
+      expect(deleteThumbnailImage).toHaveBeenCalledWith('img-existing');
+    });
   });
 });

@@ -21,9 +21,14 @@ vi.mock('../../lib/tags', () => ({
   getTags: vi.fn(),
 }));
 
+vi.mock('../../lib/thumbnails', () => ({
+  fetchThumbnailObjectUrl: vi.fn(),
+}));
+
 // Import the mocked functions so we can configure them per-test.
 import { getBookmarks } from '../../lib/bookmarks';
 import { getTags } from '../../lib/tags';
+import { fetchThumbnailObjectUrl } from '../../lib/thumbnails';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,6 +40,8 @@ function makeBookmarks(count: number, idOffset = 0): Bookmark[] {
     title: `Bookmark ${idOffset + i}`,
     url: `https://example.com/${idOffset + i}`,
     thumbnailUrl: null,
+    thumbnailFileId: null,
+    thumbnailOriginalName: null,
     tagIds: [],
     createdAt: '',
     updatedAt: '',
@@ -154,8 +161,8 @@ describe('useBookmarks', () => {
 
   it('search filters bookmarks by title (case-insensitive)', async () => {
     vi.mocked(getBookmarks).mockResolvedValue([
-      { id: 'bm-1', title: 'Hello World', url: 'https://a.com', thumbnailUrl: null, tagIds: [], createdAt: '', updatedAt: '' },
-      { id: 'bm-2', title: 'Other Bookmark', url: 'https://b.com', thumbnailUrl: null, tagIds: [], createdAt: '', updatedAt: '' },
+      { id: 'bm-1', title: 'Hello World', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '' },
+      { id: 'bm-2', title: 'Other Bookmark', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '' },
     ]);
 
     const { result } = renderHook(() =>
@@ -170,8 +177,8 @@ describe('useBookmarks', () => {
 
   it('search filters bookmarks by URL as well', async () => {
     vi.mocked(getBookmarks).mockResolvedValue([
-      { id: 'bm-1', title: 'A Page', url: 'https://github.com/foo', thumbnailUrl: null, tagIds: [], createdAt: '', updatedAt: '' },
-      { id: 'bm-2', title: 'B Page', url: 'https://example.com/bar', thumbnailUrl: null, tagIds: [], createdAt: '', updatedAt: '' },
+      { id: 'bm-1', title: 'A Page', url: 'https://github.com/foo', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '' },
+      { id: 'bm-2', title: 'B Page', url: 'https://example.com/bar', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '' },
     ]);
 
     const { result } = renderHook(() =>
@@ -186,8 +193,8 @@ describe('useBookmarks', () => {
 
   it('tag filter narrows results to bookmarks that have the selected tag', async () => {
     vi.mocked(getBookmarks).mockResolvedValue([
-      { id: 'bm-1', title: 'A', url: 'https://a.com', thumbnailUrl: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
-      { id: 'bm-2', title: 'B', url: 'https://b.com', thumbnailUrl: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '' },
+      { id: 'bm-1', title: 'A', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
+      { id: 'bm-2', title: 'B', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '' },
     ]);
 
     const { result } = renderHook(() =>
@@ -202,9 +209,9 @@ describe('useBookmarks', () => {
 
   it('search and tag filter compose with AND logic', async () => {
     vi.mocked(getBookmarks).mockResolvedValue([
-      { id: 'bm-1', title: 'Hello', url: 'https://a.com', thumbnailUrl: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
-      { id: 'bm-2', title: 'Hello', url: 'https://b.com', thumbnailUrl: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '' },
-      { id: 'bm-3', title: 'Other', url: 'https://c.com', thumbnailUrl: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
+      { id: 'bm-1', title: 'Hello', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
+      { id: 'bm-2', title: 'Hello', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '' },
+      { id: 'bm-3', title: 'Other', url: 'https://c.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
     ]);
 
     const { result } = renderHook(() =>
@@ -249,5 +256,63 @@ describe('useBookmarks', () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.isFiltered).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // File thumbnail resolution
+  // -------------------------------------------------------------------------
+  it('resolves thumbnailFileId to a blob URL via fetchThumbnailObjectUrl', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue([
+      {
+        id: 'bm-1', title: 'T', url: 'https://a.com',
+        thumbnailUrl: null, thumbnailFileId: 'img-1', thumbnailOriginalName: 'photo.jpg',
+        tagIds: [], createdAt: '', updatedAt: '',
+      },
+    ]);
+    vi.mocked(fetchThumbnailObjectUrl).mockResolvedValue('blob:fake-url-1');
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetchThumbnailObjectUrl).toHaveBeenCalledWith('img-1', mockCryptoKey);
+    expect(result.current.bookmarks[0].thumbnailUrl).toBe('blob:fake-url-1');
+  });
+
+  it('caches blob URLs so fetchThumbnailObjectUrl is not called twice for the same fileId', async () => {
+    const bm = {
+      id: 'bm-1', title: 'T', url: 'https://a.com',
+      thumbnailUrl: null, thumbnailFileId: 'img-1', thumbnailOriginalName: null,
+      tagIds: [], createdAt: '', updatedAt: '',
+    };
+    vi.mocked(getBookmarks).mockResolvedValue([bm]);
+    vi.mocked(fetchThumbnailObjectUrl).mockResolvedValue('blob:cached-url');
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // Trigger refresh — same fileId should not re-fetch
+    act(() => { result.current.refresh(); });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetchThumbnailObjectUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves thumbnailUrl as null for bookmarks without thumbnailFileId', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(1));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetchThumbnailObjectUrl).not.toHaveBeenCalled();
+    expect(result.current.bookmarks[0].thumbnailUrl).toBeNull();
   });
 });

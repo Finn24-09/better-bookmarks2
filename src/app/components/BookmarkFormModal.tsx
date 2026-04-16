@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
-import { X, Trash2 } from "lucide-react";
+import { X, Trash2, Upload } from "lucide-react";
 import { TagMultiSelect } from "./TagMultiSelect";
 import {
   Dialog,
@@ -12,6 +12,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
 import { createBookmark, updateBookmark, deleteBookmark } from "../../lib/bookmarks";
 import { createTag, setBookmarkTags, Tag } from "../../lib/tags";
+import { uploadThumbnail, deleteThumbnailImage } from "../../lib/thumbnails";
 import { useAuth } from "../contexts/AuthContext";
 
 interface BookmarkFormModalProps {
@@ -22,6 +23,8 @@ interface BookmarkFormModalProps {
     title: string;
     url: string;
     thumbnailUrl: string | null;
+    thumbnailFileId?: string | null;
+    thumbnailOriginalName?: string | null;
     tagIds: string[];
   } | null;
   availableTags: Tag[];
@@ -33,6 +36,8 @@ interface FormFields {
   url: string;
   thumbnailUrl: string;
 }
+
+type ThumbnailMode = "url" | "file";
 
 export function BookmarkFormModal({
   open,
@@ -48,10 +53,26 @@ export function BookmarkFormModal({
   const [apiError, setApiError] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Thumbnail file upload state
+  const [thumbMode, setThumbMode] = useState<ThumbnailMode>(
+    initialData?.thumbnailFileId ? "file" : "url",
+  );
+  const [pendingFileId, setPendingFileId] = useState<string | null>(
+    initialData?.thumbnailFileId ?? null,
+  );
+  const [pendingFileName, setPendingFileName] = useState<string | null>(
+    initialData?.thumbnailOriginalName ?? null,
+  );
+  // Tracks a file uploaded this session but not yet saved to a bookmark.
+  // Cleared on save, on remove, or on cancel (triggering deletion).
+  const unsavedFileIdRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormFields>({
     values: {
@@ -73,6 +94,10 @@ export function BookmarkFormModal({
       setSelectedTagIds(initialData?.tagIds ?? []);
       setApiError("");
       setIsDeleting(false);
+      setThumbMode(initialData?.thumbnailFileId ? "file" : "url");
+      setPendingFileId(initialData?.thumbnailFileId ?? null);
+      setPendingFileName(initialData?.thumbnailOriginalName ?? null);
+      unsavedFileIdRef.current = null;
       reset({
         title: initialData?.title ?? "",
         url: initialData?.url ?? "",
@@ -82,19 +107,64 @@ export function BookmarkFormModal({
   }, [open, initialData, reset]);
 
   const handleClose = () => {
+    // Clean up any file uploaded this session that was never saved to a bookmark.
+    const idToDelete = unsavedFileIdRef.current;
+    unsavedFileIdRef.current = null;
+    if (idToDelete) {
+      deleteThumbnailImage(idToDelete).catch(() => {}); // fire-and-forget
+    }
     reset();
     setApiError("");
     onClose();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !cryptoKey || !userId) return;
+
+    // If a file was already uploaded this session (not yet saved), delete it.
+    if (unsavedFileIdRef.current) {
+      await deleteThumbnailImage(unsavedFileIdRef.current).catch(() => {});
+      unsavedFileIdRef.current = null;
+    }
+
+    try {
+      const id = await uploadThumbnail(file, cryptoKey, userId);
+      unsavedFileIdRef.current = id;
+      setPendingFileId(id);
+      setPendingFileName(file.name);
+      setThumbMode("file");
+    } catch {
+      setApiError("Failed to upload image");
+    }
+  };
+
+  const handleRemoveThumbnail = async () => {
+    if (pendingFileId) {
+      await deleteThumbnailImage(pendingFileId).catch(() => {});
+    }
+    unsavedFileIdRef.current = null;
+    setPendingFileId(null);
+    setPendingFileName(null);
+    setThumbMode("url");
+    setValue("thumbnailUrl", "");
   };
 
   const onSubmit = async (data: FormFields) => {
     if (!cryptoKey || !userId) return;
     setApiError("");
     try {
+      // If the user replaced or removed an existing saved thumbnail, delete the
+      // old image now that the save is confirmed.
+      if (initialData?.thumbnailFileId && initialData.thumbnailFileId !== pendingFileId) {
+        await deleteThumbnailImage(initialData.thumbnailFileId).catch(() => {});
+      }
+
       const input = {
         title: data.title,
         url: data.url,
-        thumbnailUrl: data.thumbnailUrl.trim() || null,
+        thumbnailUrl: thumbMode === "url" ? (data.thumbnailUrl.trim() || null) : null,
+        thumbnailFileId: thumbMode === "file" ? pendingFileId : null,
       };
       if (isEditing && initialData) {
         await updateBookmark(initialData.id, input, cryptoKey);
@@ -103,6 +173,8 @@ export function BookmarkFormModal({
         const { id } = await createBookmark(input, cryptoKey, userId);
         await setBookmarkTags(id, selectedTagIds, []);
       }
+      // File is now saved — no longer needs cleanup on cancel.
+      unsavedFileIdRef.current = null;
       onSave();
       handleClose();
     } catch (err) {
@@ -116,6 +188,10 @@ export function BookmarkFormModal({
     setApiError("");
     try {
       await deleteBookmark(initialData.id);
+      // Delete the associated thumbnail file after the bookmark is gone.
+      if (initialData.thumbnailFileId) {
+        await deleteThumbnailImage(initialData.thumbnailFileId).catch(() => {});
+      }
       onSave();
       handleClose();
     } catch (err) {
@@ -165,6 +241,15 @@ export function BookmarkFormModal({
             </DialogClose>
           </div>
 
+          {/* Hidden file input */}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+          />
+
           <form onSubmit={handleSubmit(onSubmit)}>
             <div className="space-y-4">
               <div className="space-y-1.5">
@@ -195,14 +280,45 @@ export function BookmarkFormModal({
 
               <div className="space-y-1.5">
                 <label className="text-sm text-white/70">
-                  Thumbnail URL <span className="text-white/40">(optional)</span>
+                  Thumbnail <span className="text-white/40">(optional)</span>
                 </label>
-                <input
-                  type="url"
-                  placeholder="https://…"
-                  className={inputCls}
-                  {...register("thumbnailUrl")}
-                />
+
+                {thumbMode === "url" ? (
+                  <div className="space-y-2">
+                    <input
+                      type="url"
+                      placeholder="https://…"
+                      className={inputCls}
+                      {...register("thumbnailUrl")}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-2 text-sm text-white/60 hover:text-white/80 transition-colors duration-200"
+                    >
+                      <Upload className="w-4 h-4" aria-hidden="true" />
+                      Upload image
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 p-3 bg-white/5 border border-white/10 rounded-2xl">
+                    <span className="flex-1 text-sm text-white/80 truncate">{pendingFileName}</span>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-xs text-white/50 hover:text-white/80 transition-colors px-2 py-1 rounded-lg hover:bg-white/10"
+                    >
+                      Replace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemoveThumbnail}
+                      className="text-xs text-white/50 hover:text-red-400 transition-colors px-2 py-1 rounded-lg hover:bg-white/10"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">

@@ -43,3 +43,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Claude local settings
+.claude/

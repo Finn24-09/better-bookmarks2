@@ -25,8 +25,11 @@ DECLARE
   jwt_secret TEXT;
   token      TEXT;
 BEGIN
-  -- Read the JWT secret from PostgREST's app.settings.jwt_secret GUC
-  -- (set via PGRST_JWT_SECRET env var which PostgREST maps to this GUC)
+  -- Read the JWT secret injected by PostgREST at transaction start.
+  -- PostgREST sets this GUC via PGRST_APP_SETTINGS_JWT_SECRET (the
+  -- "Extra Configuration" feature); PGRST_JWT_SECRET alone does NOT
+  -- make it available here. The init script 06_set_jwt_secret.sh is a
+  -- belt-and-suspenders fallback for direct (non-PostgREST) connections.
   jwt_secret := current_setting('app.settings.jwt_secret', true);
 
   IF jwt_secret IS NULL OR jwt_secret = '' THEN
