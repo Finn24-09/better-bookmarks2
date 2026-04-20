@@ -5,4 +5,12 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pgjwt;
-CREATE EXTENSION IF NOT EXISTS pgtap;
+
+-- pgtap is only present in the dev image target; skip silently in production
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pgtap') THEN
+    CREATE EXTENSION IF NOT EXISTS pgtap;
+  END IF;
+END;
+$$;

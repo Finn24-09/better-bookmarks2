@@ -1,0 +1,48 @@
+# Development overrides — applied automatically by `docker compose up`.
+# Production deployments must use `docker compose -f docker-compose.yml up -d`.
+
+services:
+  db:
+    build:
+      target: dev          # includes pgTAP for database unit tests
+
+  postgrest:
+    ports:
+      - "3000:3000"        # expose for Vite dev proxy (npm run dev)
+
+  # Run with: docker compose --profile adminer up
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "8080:8080"
+    profiles:
+      - adminer
+
+  # Run with: docker compose run --rm test
+  test:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./docker/db/tests:/tests:ro
+    entrypoint: []
+    command: >
+      psql
+        -v ON_ERROR_STOP=0
+        -h db
+        -U ${POSTGRES_USER}
+        -d ${POSTGRES_DB}
+        -f /tests/tests.sql
+    profiles:
+      - test
