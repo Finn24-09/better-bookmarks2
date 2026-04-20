@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, LayoutGroup } from "motion/react";
+import { Bookmark as BookmarkIcon, Upload } from "lucide-react";
 import { Header } from "./components/Header";
 import { SearchBar } from "./components/SearchBar";
 import { TagFilter } from "./components/TagFilter";
@@ -9,6 +10,7 @@ import { AddBookmarkButton } from "./components/AddBookmarkButton";
 import { BookmarkFormModal } from "./components/BookmarkFormModal";
 import { ChangePasswordModal } from "./components/ChangePasswordModal";
 import { DeleteAccountModal } from "./components/DeleteAccountModal";
+import { ImportBookmarksModal } from "./components/ImportBookmarksModal";
 import { useBookmarks } from "./hooks/useBookmarks";
 import type { Bookmark } from "../lib/bookmarks";
 
@@ -32,6 +34,7 @@ export default function App() {
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const handleOpenAdd = () => {
     setEditingBookmark(null);
@@ -74,6 +77,7 @@ export default function App() {
       <Header
         onChangePassword={() => setChangePasswordOpen(true)}
         onDeleteAccount={() => setDeleteAccountOpen(true)}
+        onImportBookmarks={() => setImportOpen(true)}
       />
 
       <LayoutGroup>
@@ -88,13 +92,30 @@ export default function App() {
           {/* Bookmarks Grid */}
           {bookmarks.length === 0 && !isLoading ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
-              <p className="text-white/40 text-lg">
-                {isFiltered ? "No bookmarks match your search." : "No bookmarks yet."}
-              </p>
-              {!isFiltered && (
-                <p className="text-white/25 text-sm mt-2">
-                  Hit the + button to add your first bookmark.
-                </p>
+              {isFiltered ? (
+                <p className="text-white/40 text-lg">No bookmarks match your search.</p>
+              ) : (
+                <div className="flex flex-col items-center gap-6">
+                  <div className="w-20 h-20 bg-white/5 border border-white/10 rounded-full flex items-center justify-center">
+                    <BookmarkIcon className="w-9 h-9 text-white/30" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-xl font-semibold text-white/70">Welcome to Better Bookmarks</h2>
+                    <p className="text-white/40 text-sm max-w-xs mx-auto">
+                      Save, organise, and revisit your favourite links — all end-to-end encrypted.
+                    </p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
+                    <button
+                      onClick={() => setImportOpen(true)}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full text-sm shadow-lg shadow-purple-500/30 hover:scale-105 active:scale-95 transition-all duration-300"
+                    >
+                      <Upload className="w-4 h-4" />
+                      Import from CSV
+                    </button>
+                    <span className="text-white/30 text-sm">or use the + button to add one</span>
+                  </div>
+                </div>
               )}
             </div>
           ) : (
@@ -173,6 +194,12 @@ export default function App() {
       <DeleteAccountModal
         open={deleteAccountOpen}
         onClose={() => setDeleteAccountOpen(false)}
+      />
+
+      <ImportBookmarksModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImport={() => { setImportOpen(false); refresh(); }}
       />
     </div>
   );

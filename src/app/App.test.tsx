@@ -52,6 +52,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     title: 'Test Bookmark',
     url: 'https://example.com',
     thumbnailUrl: null,
+    thumbnailFileId: null,
+    thumbnailOriginalName: null,
     tagIds: [],
     createdAt: '',
     updatedAt: '',
@@ -115,14 +117,14 @@ describe('App', () => {
     expect(screen.getByText('Second Bookmark')).toBeInTheDocument();
   });
 
-  it('shows "No bookmarks yet." when the list is empty and not filtered', () => {
+  it('shows a welcome banner when the list is empty and not filtered', () => {
     vi.mocked(useBookmarks).mockReturnValue({
       ...DEFAULT_HOOK,
       bookmarks: [],
       isFiltered: false,
     });
     renderApp();
-    expect(screen.getByText('No bookmarks yet.')).toBeInTheDocument();
+    expect(screen.getByText('Welcome to Better Bookmarks')).toBeInTheDocument();
   });
 
   it('shows "No bookmarks match your search." when filtered with no results', () => {
@@ -137,7 +139,13 @@ describe('App', () => {
 
   it('clicking the Add Bookmark FAB opens the BookmarkFormModal', async () => {
     const user = userEvent.setup();
-    vi.mocked(useBookmarks).mockReturnValue({ ...DEFAULT_HOOK, tags: BASE_TAGS });
+    // Use a non-empty bookmark list so the welcome banner (which also has a
+    // purple gradient button) is hidden, keeping the FAB selector unambiguous.
+    vi.mocked(useBookmarks).mockReturnValue({
+      ...DEFAULT_HOOK,
+      bookmarks: [makeBookmark()],
+      tags: BASE_TAGS,
+    });
     renderApp();
 
     // FAB is the "+" button; BookmarkFormModal is not yet open

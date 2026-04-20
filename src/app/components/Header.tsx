@@ -1,4 +1,4 @@
-import { User, KeyRound, LogOut, Trash2, Mail } from "lucide-react";
+import { User, KeyRound, LogOut, Trash2, Mail, Upload } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   DropdownMenu,
@@ -12,9 +12,10 @@ import { useAuth } from "../contexts/AuthContext";
 interface HeaderProps {
   onChangePassword: () => void;
   onDeleteAccount: () => void;
+  onImportBookmarks: () => void;
 }
 
-export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
+export function Header({ onChangePassword, onDeleteAccount, onImportBookmarks }: HeaderProps) {
   const navigate = useNavigate();
   const { email, logout } = useAuth();
 
@@ -67,6 +68,16 @@ export function Header({ onChangePassword, onDeleteAccount }: HeaderProps) {
             >
               <LogOut className="w-4 h-4 shrink-0" />
               Log Out
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator className="bg-white/10 my-1" />
+
+            <DropdownMenuItem
+              onSelect={onImportBookmarks}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:text-white focus:text-white focus:bg-white/10 cursor-pointer transition-all duration-300"
+            >
+              <Upload className="w-4 h-4 shrink-0" />
+              Import Bookmarks
             </DropdownMenuItem>
 
             <DropdownMenuSeparator className="bg-white/10 my-1" />
