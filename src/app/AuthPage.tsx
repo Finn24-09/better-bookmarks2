@@ -55,6 +55,7 @@ function EyeToggle({ show, onToggle }: EyeToggleProps) {
   return (
     <button
       type="button"
+      tabIndex={-1}
       onClick={onToggle}
       className="w-7 h-7 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors duration-300"
     >
@@ -251,18 +252,6 @@ export function AuthPage() {
               <p className="text-sm text-white/50">Welcome back</p>
             </div>
             <LoginForm onSuccess={handleSuccess} />
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-white/10" />
-              <span className="text-xs text-white/30">or</span>
-              <div className="flex-1 h-px bg-white/10" />
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate("/")}
-              className="w-full py-3 bg-white/5 border border-white/10 text-white/70 rounded-full text-sm hover:bg-white/10 hover:text-white hover:border-white/20 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300"
-            >
-              Continue as guest →
-            </button>
           </div>
         </div>
 
@@ -415,18 +404,6 @@ export function AuthPage() {
                   className="space-y-4"
                 >
                   <LoginForm onSuccess={handleSuccess} />
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 h-px bg-white/10" />
-                    <span className="text-xs text-white/30">or</span>
-                    <div className="flex-1 h-px bg-white/10" />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => navigate("/")}
-                    className="w-full py-3 bg-white/5 border border-white/10 text-white/70 rounded-full text-sm hover:bg-white/10 hover:text-white hover:border-white/20 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300"
-                  >
-                    Continue as guest →
-                  </button>
                 </motion.div>
               ) : (
                 <motion.div

@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { motion, LayoutGroup } from "motion/react";
 import { Bookmark as BookmarkIcon, Upload } from "lucide-react";
 import { Header } from "./components/Header";
 import { SearchBar } from "./components/SearchBar";
@@ -80,7 +79,6 @@ export default function App() {
         onImportBookmarks={() => setImportOpen(true)}
       />
 
-      <LayoutGroup>
         <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 px-4 md:px-6 lg:px-8 pt-6 md:pt-8 pb-8">
 
           {/* Search and Filters */}
@@ -119,11 +117,7 @@ export default function App() {
               )}
             </div>
           ) : (
-            <motion.div
-              layout
-              transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"
-            >
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
               {bookmarks.map((bookmark) => (
                 <BookmarkCard
                   key={bookmark.id}
@@ -134,7 +128,7 @@ export default function App() {
                   onEdit={() => handleOpenEdit(bookmark)}
                 />
               ))}
-            </motion.div>
+            </div>
           )}
 
           {/* Loading indicator */}
@@ -147,7 +141,6 @@ export default function App() {
           {/* Infinite scroll sentinel */}
           <div ref={sentinelRef} className="h-1" />
         </div>
-      </LayoutGroup>
 
       {/* Add Bookmark FAB */}
       <div

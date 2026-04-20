@@ -57,18 +57,6 @@ describe('AuthPage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Guest access
-  // -------------------------------------------------------------------------
-
-  it('"Continue as guest" navigates to /', async () => {
-    const user = userEvent.setup();
-    renderPage();
-    // Multiple instances may be in the DOM (desktop + mobile); click the first
-    await user.click(screen.getAllByRole('button', { name: /continue as guest/i })[0]);
-    expect(mockNavigate).toHaveBeenCalledWith('/');
-  });
-
-  // -------------------------------------------------------------------------
   // Login form – validation
   // -------------------------------------------------------------------------
 

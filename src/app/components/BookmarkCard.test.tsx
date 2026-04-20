@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BookmarkCard } from './BookmarkCard';
 
@@ -29,6 +29,31 @@ describe('BookmarkCard', () => {
 
   it('renders a gradient placeholder div (no img element) when no thumbnail is provided', () => {
     render(<BookmarkCard title="My Video" url="https://example.com/video" tags={[]} />);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('renders an img element when a valid thumbnail URL is provided', () => {
+    render(
+      <BookmarkCard
+        title="My Video"
+        url="https://example.com/video"
+        thumbnail="https://example.com/thumb.jpg"
+        tags={[]}
+      />,
+    );
+    expect(screen.getByRole('img')).toHaveAttribute('src', 'https://example.com/thumb.jpg');
+  });
+
+  it('falls back to the placeholder (no img) when the img fires an error', () => {
+    render(
+      <BookmarkCard
+        title="My Video"
+        url="https://example.com/video"
+        thumbnail="https://example.com/thumb.jpg"
+        tags={[]}
+      />,
+    );
+    fireEvent.error(screen.getByRole('img'));
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
