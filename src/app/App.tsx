@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { toast } from "sonner";
 import { Bookmark as BookmarkIcon, Upload } from "lucide-react";
 import { Header } from "./components/Header";
 import { SearchBar } from "./components/SearchBar";
@@ -23,8 +24,12 @@ export default function App() {
   // --------------------------------------------------------------------------
   // Data
   // --------------------------------------------------------------------------
-  const { bookmarks, tags, isLoading, hasMore, isFiltered, loadMore, refresh } =
+  const { bookmarks, tags, isLoading, hasMore, isFiltered, error, loadMore, refresh } =
     useBookmarks({ search, selectedTagId });
+
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error]);
 
   // --------------------------------------------------------------------------
   // Modals

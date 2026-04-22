@@ -49,6 +49,22 @@ export async function createTag(name: string, userId: string, key: CryptoKey): P
 }
 
 // ---------------------------------------------------------------------------
+// Re-encrypt (key rotation on password change)
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-encrypt a tag's name_enc with a new key.
+ * name_hmac is keyed on userId (not the password) so it never changes.
+ */
+export async function reencryptTag(id: string, name: string, newKey: CryptoKey): Promise<void> {
+  const name_enc = await encrypt(newKey, name);
+  await apiFetch(`/tags?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name_enc }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Delete
 // ---------------------------------------------------------------------------
 

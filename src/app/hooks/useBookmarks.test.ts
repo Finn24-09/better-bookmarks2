@@ -315,4 +315,79 @@ describe('useBookmarks', () => {
     expect(fetchThumbnailObjectUrl).not.toHaveBeenCalled();
     expect(result.current.bookmarks[0].thumbnailUrl).toBeNull();
   });
+
+  // -------------------------------------------------------------------------
+  // Failure resilience — prevents infinite IntersectionObserver loop
+  // -------------------------------------------------------------------------
+  it('hasMore stays false when the initial load fails', async () => {
+    // If load() throws silently and hasMore stayed true, the IntersectionObserver
+    // would call loadMore() in an infinite loop every time isLoading toggles.
+    vi.mocked(getBookmarks).mockRejectedValue(new Error('network error'));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  it('hasMore stays false when the initial load fails mid-decrypt', async () => {
+    // Simulate decryption failure (wrong key) — the kind that occurs when
+    // account data is encrypted with a different user's key.
+    vi.mocked(getBookmarks).mockRejectedValue(
+      new DOMException('The operation failed for an operation-specific reason', 'OperationError'),
+    );
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Error state
+  // -------------------------------------------------------------------------
+  it('sets error when getBookmarks throws', async () => {
+    vi.mocked(getBookmarks).mockRejectedValue(new Error('network error'));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBe('network error');
+    expect(result.current.bookmarks).toHaveLength(0);
+  });
+
+  it('clears error on successful refresh after a failure', async () => {
+    vi.mocked(getBookmarks)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce(makeBookmarks(3));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBe('network error');
+
+    act(() => { result.current.refresh(); });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(result.current.bookmarks).toHaveLength(3);
+  });
+
+  it('error is null on successful initial load', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(5));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBeNull();
+  });
 });

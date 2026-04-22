@@ -52,7 +52,7 @@ export async function getBookmarks(
   if (options.offset !== undefined) params.set('offset', String(options.offset));
 
   const rows = await apiFetch<BookmarkRow[]>(`/bookmarks_with_tags?${params}`);
-  return Promise.all(rows.map((r) => decryptBookmark(r, key)));
+  return Promise.all((rows ?? []).map((r) => decryptBookmark(r, key)));
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +115,27 @@ export async function updateBookmark(
   };
 
   await apiFetch(`/bookmarks?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Re-encrypt (key rotation on password change)
+// ---------------------------------------------------------------------------
+
+/** Re-encrypt all encrypted fields of a bookmark with a new key. */
+export async function reencryptBookmark(bm: Bookmark, newKey: CryptoKey): Promise<void> {
+  const body: Record<string, string | null> = {
+    title_enc: await encrypt(newKey, bm.title),
+    url_enc: await encrypt(newKey, bm.url),
+    thumbnail_url_enc: bm.thumbnailUrl ? await encrypt(newKey, bm.thumbnailUrl) : null,
+    thumbnail_original_name_enc: bm.thumbnailOriginalName
+      ? await encrypt(newKey, bm.thumbnailOriginalName)
+      : null,
+    updated_at: new Date().toISOString(),
+  };
+  await apiFetch(`/bookmarks?id=eq.${bm.id}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });

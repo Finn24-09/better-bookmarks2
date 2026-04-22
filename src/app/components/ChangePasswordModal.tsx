@@ -12,6 +12,9 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
 import { changePassword } from "../../lib/auth";
 import { deriveKey } from "../../lib/crypto";
+import { getBookmarks, reencryptBookmark } from "../../lib/bookmarks";
+import { getTags, reencryptTag } from "../../lib/tags";
+import { reencryptThumbnail } from "../../lib/thumbnails";
 import { useAuth } from "../contexts/AuthContext";
 
 interface ChangePasswordModalProps {
@@ -26,7 +29,7 @@ interface FormFields {
 }
 
 export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps) {
-  const { email, updateKey } = useAuth();
+  const { email, cryptoKey, updateKey } = useAuth();
   const [apiError, setApiError] = useState("");
 
   const {
@@ -46,13 +49,37 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
   const onSubmit = async (data: FormFields) => {
     setApiError("");
     try {
+      if (!cryptoKey || !email) throw new Error("Not authenticated");
+
+      const newKey = await deriveKey(data.newPassword, email);
+
+      // Fetch all data to re-encrypt while we still have the current key.
+      const [allBookmarks, allTags] = await Promise.all([
+        getBookmarks(cryptoKey),
+        getTags(cryptoKey),
+      ]);
+
+      // Re-encrypt bookmark fields (title, url, thumbnail URL and filename).
+      await Promise.all(allBookmarks.map((bm) => reencryptBookmark(bm, newKey)));
+
+      // Re-encrypt thumbnail binary files stored in thumbnail_images.
+      await Promise.all(
+        allBookmarks
+          .filter((bm) => bm.thumbnailFileId)
+          .map((bm) =>
+            reencryptThumbnail(bm.thumbnailFileId!, bm.thumbnailOriginalName ?? '', cryptoKey, newKey),
+          ),
+      );
+
+      // Re-encrypt tag names (name_hmac is keyed on userId, not password — unchanged).
+      await Promise.all(allTags.map((tag) => reencryptTag(tag.id, tag.name, newKey)));
+
+      // Only update the DB password after all re-encryption succeeds.
       await changePassword(data.currentPassword, data.newPassword);
-      // Re-derive encryption key with the new password so stored data stays
-      // decryptable in this session.
-      if (email) {
-        const newKey = await deriveKey(data.newPassword, email);
-        updateKey(newKey);
-      }
+
+      // Switch to new key in memory.
+      updateKey(newKey);
+
       toast.success("Password updated");
       handleClose();
     } catch (err) {

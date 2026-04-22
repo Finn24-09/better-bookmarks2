@@ -39,7 +39,10 @@ ALTER TABLE api.bookmarks
 -- NOTE: CREATE OR REPLACE VIEW requires existing columns stay in their original
 -- order; new columns may only be appended at the end. thumbnail_file_id and
 -- thumbnail_original_name_enc are therefore placed after tag_ids.
-CREATE OR REPLACE VIEW api.bookmarks_with_tags AS
+-- security_invoker = true: see 01_schema.sql for explanation.
+CREATE OR REPLACE VIEW api.bookmarks_with_tags
+  WITH (security_invoker = true)
+AS
   SELECT
     b.id,
     b.user_id,

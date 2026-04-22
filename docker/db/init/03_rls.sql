@@ -11,12 +11,16 @@
 
 -- Helper: extract the authenticated caller's UUID from the JWT claim.
 -- Returns NULL if no JWT is present (anon requests).
+--
+-- MUST be VOLATILE: PostgreSQL's docs warn that STABLE/IMMUTABLE functions in
+-- RLS policies may be evaluated at plan time and embedded as a constant in
+-- generic prepared-statement plans. After any user makes their first request,
+-- PostgreSQL would cache that user's UUID in the plan and return it for ALL
+-- subsequent users — breaking multi-user isolation entirely.
 CREATE OR REPLACE FUNCTION api.current_user_id()
 RETURNS UUID
 LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = api, public
+VOLATILE
 AS $$
   SELECT NULLIF(
     current_setting('request.jwt.claims', true)::JSON->>'sub',

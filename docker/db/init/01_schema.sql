@@ -87,8 +87,17 @@ CREATE TABLE IF NOT EXISTS api.bookmark_tags (
 -- api.bookmarks_with_tags  (view)
 -- Returns each bookmark with an array of its associated tag_ids so the
 -- frontend can fetch bookmarks + their tag associations in one request.
+--
+-- MUST use security_invoker = true: the view is owned by a superuser (the
+-- DB init role). PostgreSQL evaluates RLS using the VIEW OWNER's identity
+-- by default; since superusers bypass RLS, every authenticated user would
+-- see every other user's bookmarks. security_invoker = true forces RLS to
+-- be evaluated as the QUERYING USER instead, so the bookmarks_select policy
+-- (user_id = api.current_user_id()) is applied correctly.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE VIEW api.bookmarks_with_tags AS
+CREATE OR REPLACE VIEW api.bookmarks_with_tags
+  WITH (security_invoker = true)
+AS
   SELECT
     b.id,
     b.user_id,
