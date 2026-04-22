@@ -41,8 +41,8 @@ BEGIN
       'role',  'app_user',
       'sub',   user_id::TEXT,
       'email', user_email,
-      -- Expire in 7 days
-      'exp',   EXTRACT(EPOCH FROM NOW() + INTERVAL '7 days')::BIGINT
+      -- Expire in 24 hours — shorter window limits stolen-token blast radius
+      'exp',   EXTRACT(EPOCH FROM NOW() + INTERVAL '24 hours')::BIGINT
     ),
     jwt_secret
   );
@@ -80,9 +80,9 @@ BEGIN
     RAISE EXCEPTION 'Password must be at least 8 characters' USING ERRCODE = 'check_violation';
   END IF;
 
-  -- Hash password with bcrypt, work factor 12 (irreversible)
+  -- Hash password with bcrypt, work factor 13 (irreversible)
   INSERT INTO auth.users (email, password)
-  VALUES (lower(trim(email)), crypt(password, gen_salt('bf', 12)))
+  VALUES (lower(trim(email)), crypt(password, gen_salt('bf', 13)))
   RETURNING * INTO new_user;
 
   token := api._sign_jwt(new_user.id, new_user.email);
@@ -93,7 +93,7 @@ BEGIN
   );
 EXCEPTION
   WHEN unique_violation THEN
-    RAISE EXCEPTION 'Email already registered' USING ERRCODE = 'unique_violation';
+    RAISE EXCEPTION 'Registration failed. Please try again.' USING ERRCODE = 'unique_violation';
 END;
 $$;
 
@@ -181,7 +181,7 @@ BEGIN
 
   -- Update with new bcrypt hash
   UPDATE auth.users
-  SET password = crypt(new_password, gen_salt('bf', 12))
+  SET password = crypt(new_password, gen_salt('bf', 13))
   WHERE id = caller_id;
 END;
 $$;

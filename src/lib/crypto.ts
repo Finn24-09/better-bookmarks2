@@ -1,4 +1,4 @@
-const PBKDF2_ITERATIONS = 210_000;
+const PBKDF2_ITERATIONS = 600_000;
 
 /** Derive a 256-bit AES-GCM key from password + email via PBKDF2-SHA-256. */
 export async function deriveKey(password: string, email: string): Promise<CryptoKey> {

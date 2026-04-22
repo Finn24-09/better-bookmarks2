@@ -9,7 +9,8 @@ FROM postgres:16-alpine AS production
 RUN set -eux \
     && apk add --no-cache --virtual .build-deps \
            git make gcc musl-dev postgresql-dev \
-    && git clone --depth 1 https://github.com/michelp/pgjwt.git /tmp/pgjwt \
+    && git clone https://github.com/michelp/pgjwt.git /tmp/pgjwt \
+    && git -C /tmp/pgjwt checkout f3d82fd30151e754e19ce5d6a06c71c20689ce3d \
     && make -C /tmp/pgjwt install \
     && rm -rf /tmp/pgjwt \
     && apk del .build-deps

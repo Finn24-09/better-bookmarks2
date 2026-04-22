@@ -288,9 +288,17 @@ export function BookmarkFormModal({
                     <input
                       type="url"
                       placeholder="https://…"
-                      className={inputCls}
-                      {...register("thumbnailUrl")}
+                      className={errors.thumbnailUrl ? errorInputCls : inputCls}
+                      {...register("thumbnailUrl", {
+                        validate: (v) => {
+                          if (!v) return true;
+                          return /^https?:\/\//i.test(v) || "Only http:// or https:// URLs are allowed";
+                        },
+                      })}
                     />
+                    {errors.thumbnailUrl && (
+                      <p className="text-xs text-red-400">{errors.thumbnailUrl.message}</p>
+                    )}
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}

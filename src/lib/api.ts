@@ -34,13 +34,26 @@ export async function apiFetch<T = unknown>(
   const response = await fetch(`/api${path}`, { ...options, headers });
 
   if (!response.ok) {
-    let message = `HTTP ${response.status}`;
-    try {
-      const body = await response.json();
-      // PostgREST wraps DB RAISE EXCEPTION messages in { message }
-      message = body.message ?? body.hint ?? message;
-    } catch {
-      // ignore parse errors
+    // For 400/409 relay the PostgREST message — these are intentional
+    // user-facing errors from sign_in/sign_up SQL functions. For all other
+    // status codes use generic messages to avoid leaking DB schema details.
+    const STATUS_MESSAGES: Record<number, string> = {
+      401: 'Authentication required. Please sign in.',
+      403: 'You do not have permission to perform this action.',
+      404: 'The requested resource was not found.',
+      429: 'Too many requests. Please wait a moment and try again.',
+      500: 'An unexpected server error occurred. Please try again.',
+      503: 'The service is temporarily unavailable. Please try again.',
+    };
+
+    let message = STATUS_MESSAGES[response.status] ?? `Request failed (${response.status})`;
+    if (response.status === 400 || response.status === 401 || response.status === 409) {
+      try {
+        const body = await response.json();
+        message = body.message ?? body.hint ?? message;
+      } catch {
+        // ignore parse errors — keep generic fallback
+      }
     }
     throw new ApiError(response.status, message);
   }

@@ -88,7 +88,7 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
         setHasMore(fetchAll ? false : resolved.length === PAGE_SIZE);
         setFetchedAll(fetchAll);
       } catch (e) {
-        console.error('[useBookmarks] load failed:', e);
+        if (import.meta.env.DEV) console.error('[useBookmarks] load failed:', e);
         if (id === fetchIdRef.current) {
           setError(e instanceof Error ? e.message : 'Failed to load bookmarks');
           setHasMore(false);

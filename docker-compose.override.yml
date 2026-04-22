@@ -12,7 +12,7 @@ services:
 
   # Run with: docker compose --profile adminer up
   adminer:
-    image: adminer:latest
+    image: adminer:4.8.1
     restart: unless-stopped
     depends_on:
       db:

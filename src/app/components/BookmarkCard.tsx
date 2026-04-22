@@ -17,7 +17,7 @@ export function BookmarkCard({ thumbnail, title, url, tags, onEdit }: BookmarkCa
     <div className="group bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden transition-all duration-300 hover:bg-white/10 hover:border-white/20 hover:scale-[1.02] hover:shadow-2xl hover:shadow-purple-500/20 flex flex-col">
       {/* Thumbnail */}
       <div className="relative aspect-video bg-gradient-to-br from-purple-900/20 to-slate-900/20 overflow-hidden flex-shrink-0">
-        {thumbnail && !imgError ? (
+        {thumbnail && !imgError && /^(https?:|blob:)/i.test(thumbnail) ? (
           <img
             src={thumbnail}
             alt={title}

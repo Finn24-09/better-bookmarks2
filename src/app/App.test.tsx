@@ -69,6 +69,7 @@ const DEFAULT_HOOK: ReturnType<typeof useBookmarks> = {
   isLoading: false,
   hasMore: false,
   isFiltered: false,
+  error: null,
   loadMore: vi.fn(),
   refresh: vi.fn(),
 };
@@ -151,9 +152,7 @@ describe('App', () => {
     // FAB is the "+" button; BookmarkFormModal is not yet open
     expect(screen.queryByText('Add Bookmark')).not.toBeInTheDocument();
 
-    // Find the circular FAB with a Plus icon (it has no text, but it's the only
-    // button with the purple gradient class)
-    const fabButton = document.querySelector('button.bg-gradient-to-br') as HTMLButtonElement;
+    const fabButton = screen.getByRole('button', { name: /add bookmark/i });
     await user.click(fabButton);
 
     await waitFor(() =>
@@ -172,10 +171,8 @@ describe('App', () => {
 
     expect(screen.queryByText('Edit Bookmark')).not.toBeInTheDocument();
 
-    // Navigate to the card via its title, then pick the first button (Pencil).
-    // The "Open bookmark" play buttons come after it and have aria-label set.
     const card = screen.getByText('My Bookmark').closest('.group') as HTMLElement;
-    const editButton = card.querySelector('button:not([aria-label])') as HTMLButtonElement;
+    const editButton = card.querySelector('button[aria-label="Edit bookmark"]') as HTMLButtonElement;
     await user.click(editButton);
 
     await waitFor(() =>

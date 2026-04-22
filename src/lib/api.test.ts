@@ -84,16 +84,28 @@ describe('apiFetch', () => {
   // -------------------------------------------------------------------------
   // Error handling
   // -------------------------------------------------------------------------
-  it('throws ApiError with status and PostgREST message for non-OK responses', async () => {
+  it('throws ApiError with generic message for 403 (does not leak server details)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 403,
-      json: async () => ({ message: 'Permission denied' }),
+      json: async () => ({ message: 'permission denied for table bookmarks' }),
+    }));
+
+    const err = await apiFetch('/test').catch((e) => e) as ApiError;
+    expect(err.status).toBe(403);
+    expect(err.message).toBe('You do not have permission to perform this action.');
+  });
+
+  it('throws ApiError with PostgREST message for 401 (sign_in error is user-friendly)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: 'Invalid email or password' }),
     }));
 
     await expect(apiFetch('/test')).rejects.toMatchObject({
-      status: 403,
-      message: 'Permission denied',
+      status: 401,
+      message: 'Invalid email or password',
     });
   });
 

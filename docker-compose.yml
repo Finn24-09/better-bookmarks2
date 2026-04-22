@@ -23,6 +23,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # PostgreSQL requires CHOWN/FOWNER/SETUID/SETGID/DAC_OVERRIDE for socket
+    # and data directory management — cannot drop these.
+    cap_drop:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - AUDIT_WRITE
+      - MKNOD
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
     networks:
       - betterbookmarks2
 
@@ -46,6 +59,16 @@ services:
       PGRST_DB_EXTRA_SEARCH_PATH:    auth
     # No ports: PostgREST is on the internal network only.
     # nginx proxies /api/* → postgrest:3000 for all external traffic.
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
     networks:
       - betterbookmarks2
 
@@ -58,6 +81,34 @@ services:
       - postgrest
     ports:
       - "80:80"
+    # nginx needs NET_BIND_SERVICE to listen on port 80.
+    # nginx needs CHOWN to set ownership on its tmpfs cache dirs at startup
+    # (chowns /var/cache/nginx/client_temp to uid 101). With read_only: true
+    # this capability is constrained to the writable tmpfs mounts only.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # bind port 80
+      - CHOWN             # chown /var/cache/nginx/client_temp to uid 101 at startup
+      - SETGID            # master → worker privilege drop: setgid(101)
+      - SETUID            # master → worker privilege drop: setuid(101)
+    read_only: true
+    tmpfs:
+      # nginx writes request temp files here; CHOWN capability allows the
+      # startup chown of client_temp to uid 101 (nginx worker user).
+      - /var/cache/nginx
+      # Alpine Linux: /var/run → /run (symlink). nginx writes its PID to
+      # /run/nginx.pid, so /run must be the writable tmpfs, not /var/run.
+      - /run
+      # NOTE: /var/log/nginx is intentionally NOT a tmpfs. The official nginx
+      # image symlinks access.log → /dev/stdout and error.log → /dev/stderr so
+      # that Docker captures nginx output. Mounting a tmpfs there would replace
+      # those symlinks with an empty directory, making nginx errors invisible.
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.5"
     networks:
       - betterbookmarks2
 
