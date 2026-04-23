@@ -1,4 +1,4 @@
-import { Github } from "lucide-react";
+import { GitFork } from "lucide-react";
 
 export function FloatingFooter() {
   return (
@@ -12,7 +12,7 @@ export function FloatingFooter() {
           rel="noopener noreferrer"
           className="flex items-center gap-2 text-white/60 hover:text-white/90 transition-colors duration-300"
         >
-          <Github className="w-4 h-4" />
+          <GitFork className="w-4 h-4" />
           <span className="text-xs">@finn24-09</span>
         </a>
       </div>
