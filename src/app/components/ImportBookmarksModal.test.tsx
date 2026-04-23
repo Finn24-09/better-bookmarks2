@@ -23,12 +23,17 @@ vi.mock('../../lib/bookmarks', () => ({
   createBookmark: vi.fn(),
 }));
 
+vi.mock('../../lib/thumbnails', () => ({
+  uploadThumbnailFromBytes: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Imports after mocks are declared
 // ---------------------------------------------------------------------------
 
 import { getTags, createTag, setBookmarkTags } from '../../lib/tags';
 import { createBookmark } from '../../lib/bookmarks';
+import { uploadThumbnailFromBytes } from '../../lib/thumbnails';
 
 // ---------------------------------------------------------------------------
 // CSV fixtures
@@ -43,6 +48,26 @@ function makeCsv(...dataRows: string[]): File {
 
 const ROW_A = '"1","Bookmark A","https://example.com/a","","tag1|tag2","","","",""';
 const ROW_B = '"2","Bookmark B","https://example.com/b","","tag2|tag3","","","",""';
+
+// ---------------------------------------------------------------------------
+// JSON fixtures
+// ---------------------------------------------------------------------------
+
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+const validJpegBase64 = btoa(String.fromCharCode(...JPEG_BYTES));
+const validDataUri = `data:image/jpeg;base64,${validJpegBase64}`;
+
+function makeJsonExport(bookmarks: unknown[] = [
+  { title: 'JSON Bookmark', url: 'https://json.example.com', tags: ['a', 'b'], thumbnail: null },
+]): File {
+  const content = JSON.stringify({
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    totalBookmarks: bookmarks.length,
+    bookmarks,
+  });
+  return new File([content], 'export.json', { type: 'application/json' });
+}
 
 // ---------------------------------------------------------------------------
 // Render helpers
@@ -73,34 +98,37 @@ beforeEach(() => {
   vi.mocked(createTag).mockImplementation(async (name) => ({ id: `tag-${name}`, name }));
   vi.mocked(setBookmarkTags).mockResolvedValue(undefined);
   vi.mocked(createBookmark).mockResolvedValue({ id: 'bm-new' });
+  vi.mocked(uploadThumbnailFromBytes).mockResolvedValue('thumb-id-1');
 });
 
 // ---------------------------------------------------------------------------
-// Tests
+// CSV tests (regression)
 // ---------------------------------------------------------------------------
 
-describe('ImportBookmarksModal', () => {
-  it('renders file input and a "Choose CSV file" button in idle state', () => {
+describe('ImportBookmarksModal — CSV', () => {
+  it('renders file input and a "Choose a CSV or JSON file" button in idle state', () => {
     renderModal();
-    expect(screen.getByText(/choose csv file/i)).toBeInTheDocument();
+    expect(screen.getByText(/choose a csv or json file/i)).toBeInTheDocument();
     expect(document.querySelector('input[type="file"]')).toBeInTheDocument();
   });
 
-  it('shows a format help toggle that reveals the required column list', async () => {
+  it('shows a format help toggle that reveals CSV and JSON format details', async () => {
     renderModal();
-    const toggle = screen.getByRole('button', { name: /what format/i });
+    const toggle = screen.getByRole('button', { name: /what file formats/i });
     fireEvent.click(toggle);
     await waitFor(() => {
-      expect(screen.getByText(/required columns/i)).toBeInTheDocument();
+      expect(screen.getByText(/json \(recommended\)/i)).toBeInTheDocument();
+      // "Required: Title, URL" text is unique to the CSV section
+      expect(screen.getByText(/required:/i)).toBeInTheDocument();
     });
   });
 
-  it('shows an error immediately when a non-.csv file is picked', async () => {
+  it('shows an error immediately when a non-csv/json file is picked', async () => {
     renderModal();
     const txtFile = new File(['content'], 'bookmarks.txt', { type: 'text/plain' });
     pickFile(txtFile);
     await waitFor(() => {
-      expect(screen.getByText(/must be a .csv file/i)).toBeInTheDocument();
+      expect(screen.getByText(/must be a .csv or .json file/i)).toBeInTheDocument();
     });
   });
 
@@ -159,7 +187,6 @@ describe('ImportBookmarksModal', () => {
   });
 
   it('shows a progress indicator during import', async () => {
-    // Make createBookmark slow so we can observe the in-progress state
     let resolveFirst!: (v: { id: string }) => void;
     vi.mocked(createBookmark)
       .mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }))
@@ -177,7 +204,7 @@ describe('ImportBookmarksModal', () => {
     resolveFirst({ id: 'bm-1' });
   });
 
-  it('calls onImport after a successful import', async () => {
+  it('calls onImport after a successful CSV import', async () => {
     const onImport = vi.fn();
     render(<ImportBookmarksModal open={true} onClose={vi.fn()} onImport={onImport} />);
 
@@ -190,6 +217,18 @@ describe('ImportBookmarksModal', () => {
     });
   });
 
+  it('does not call uploadThumbnailFromBytes for CSV imports', async () => {
+    renderModal();
+    pickFile(makeCsv(ROW_A));
+    await waitFor(() => screen.getByRole('button', { name: /^import/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^import/i }));
+
+    await waitFor(() => {
+      expect(createBookmark).toHaveBeenCalledTimes(1);
+    });
+    expect(uploadThumbnailFromBytes).not.toHaveBeenCalled();
+  });
+
   it('resets to idle state when Cancel is clicked from the preview screen', async () => {
     renderModal();
     pickFile(makeCsv(ROW_A));
@@ -198,8 +237,152 @@ describe('ImportBookmarksModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/choose csv file/i)).toBeInTheDocument();
+      expect(screen.getByText(/choose a csv or json file/i)).toBeInTheDocument();
       expect(createBookmark).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JSON tests
+// ---------------------------------------------------------------------------
+
+describe('ImportBookmarksModal — JSON', () => {
+  it('shows an error when an invalid JSON file is picked', async () => {
+    renderModal();
+    const bad = new File(['not json {{{'], 'export.json', { type: 'application/json' });
+    pickFile(bad);
+    await waitFor(() => {
+      expect(screen.getByText(/not valid json/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows an error when the JSON file has the wrong version', async () => {
+    renderModal();
+    const bad = new File(
+      [JSON.stringify({ version: 2, bookmarks: [] })],
+      'export.json',
+    );
+    pickFile(bad);
+    await waitFor(() => {
+      expect(screen.getByText(/version/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows a preview with the importable bookmark count after a valid JSON is picked', async () => {
+    renderModal();
+    pickFile(makeJsonExport());
+    await waitFor(() => {
+      expect(screen.getByText(/ready to import/i)).toBeInTheDocument();
+      // The import button also shows the count — unique and unambiguous
+      expect(screen.getByRole('button', { name: /import 1 bookmark/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows thumbnail note in preview when JSON bookmarks have embedded thumbnail data', async () => {
+    renderModal();
+    pickFile(makeJsonExport([
+      { title: 'T', url: 'https://example.com', tags: [], thumbnail: { type: 'data', value: validDataUri, originalName: 'thumb.jpg' } },
+    ]));
+    await waitFor(() => {
+      expect(screen.getByText(/thumbnail images will be encrypted/i)).toBeInTheDocument();
+    });
+  });
+
+  it('calls createBookmark once per valid JSON bookmark', async () => {
+    renderModal();
+    pickFile(makeJsonExport([
+      { title: 'A', url: 'https://a.com', tags: [], thumbnail: null },
+      { title: 'B', url: 'https://b.com', tags: [], thumbnail: null },
+    ]));
+    await waitFor(() => screen.getByRole('button', { name: /^import/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^import/i }));
+
+    await waitFor(() => {
+      expect(createBookmark).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('calls uploadThumbnailFromBytes for each bookmark with embedded JPEG data', async () => {
+    renderModal();
+    pickFile(makeJsonExport([
+      { title: 'T', url: 'https://example.com', tags: [], thumbnail: { type: 'data', value: validDataUri, originalName: 'pic.jpg' } },
+    ]));
+    await waitFor(() => screen.getByRole('button', { name: /^import/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^import/i }));
+
+    await waitFor(() => {
+      expect(uploadThumbnailFromBytes).toHaveBeenCalledTimes(1);
+      expect(uploadThumbnailFromBytes).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        'pic.jpg',
+        expect.anything(),
+        'user-1',
+      );
+    });
+  });
+
+  it('passes the uploaded thumbnail file ID to createBookmark', async () => {
+    vi.mocked(uploadThumbnailFromBytes).mockResolvedValue('uploaded-thumb-id');
+    renderModal();
+    pickFile(makeJsonExport([
+      { title: 'T', url: 'https://example.com', tags: [], thumbnail: { type: 'data', value: validDataUri, originalName: 'pic.jpg' } },
+    ]));
+    await waitFor(() => screen.getByRole('button', { name: /^import/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^import/i }));
+
+    await waitFor(() => {
+      expect(createBookmark).toHaveBeenCalledWith(
+        expect.objectContaining({ thumbnailFileId: 'uploaded-thumb-id', thumbnailUrl: null }),
+        expect.anything(),
+        'user-1',
+      );
+    });
+  });
+
+  it('still creates the bookmark if thumbnail upload fails', async () => {
+    vi.mocked(uploadThumbnailFromBytes).mockRejectedValue(new Error('Upload failed'));
+    renderModal();
+    pickFile(makeJsonExport([
+      { title: 'T', url: 'https://example.com', tags: [], thumbnail: { type: 'data', value: validDataUri, originalName: 'pic.jpg' } },
+    ]));
+    await waitFor(() => screen.getByRole('button', { name: /^import/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^import/i }));
+
+    await waitFor(() => {
+      expect(createBookmark).toHaveBeenCalledTimes(1);
+      expect(createBookmark).toHaveBeenCalledWith(
+        expect.objectContaining({ thumbnailFileId: null }),
+        expect.anything(),
+        'user-1',
+      );
+    });
+  });
+
+  it('does not call uploadThumbnailFromBytes for URL-type thumbnails', async () => {
+    renderModal();
+    pickFile(makeJsonExport([
+      { title: 'T', url: 'https://example.com', tags: [], thumbnail: { type: 'url', value: 'https://img.example.com/pic.jpg' } },
+    ]));
+    await waitFor(() => screen.getByRole('button', { name: /^import/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^import/i }));
+
+    await waitFor(() => {
+      expect(createBookmark).toHaveBeenCalledTimes(1);
+    });
+    expect(uploadThumbnailFromBytes).not.toHaveBeenCalled();
+  });
+
+  it('calls onImport after a successful JSON import', async () => {
+    const onImport = vi.fn();
+    render(<ImportBookmarksModal open={true} onClose={vi.fn()} onImport={onImport} />);
+
+    pickFile(makeJsonExport());
+    await waitFor(() => screen.getByRole('button', { name: /^import/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^import/i }));
+
+    await waitFor(() => {
+      expect(onImport).toHaveBeenCalledTimes(1);
     });
   });
 });

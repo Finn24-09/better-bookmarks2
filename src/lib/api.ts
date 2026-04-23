@@ -68,3 +68,27 @@ export async function apiFetch<T = unknown>(
     return undefined as T;
   }
 }
+
+/**
+ * Makes a count-only request using PostgREST's `Prefer: count=exact` and reads
+ * the total from the `Content-Range` response header. Returns null on any
+ * failure so callers can degrade gracefully (show progress without a total).
+ */
+export async function apiFetchCount(path: string, signal?: AbortSignal): Promise<number | null> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Prefer: 'count=exact',
+  };
+  if (_token) headers['Authorization'] = `Bearer ${_token}`;
+
+  try {
+    const response = await fetch(`/api${path}`, { headers, signal });
+    if (!response.ok) return null;
+    const contentRange = response.headers.get('Content-Range');
+    if (!contentRange) return null;
+    const match = contentRange.match(/\/(\d+)$/);
+    return match ? parseInt(match[1], 10) : null;
+  } catch {
+    return null;
+  }
+}

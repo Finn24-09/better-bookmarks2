@@ -11,6 +11,7 @@ import { BookmarkFormModal } from "./components/BookmarkFormModal";
 import { ChangePasswordModal } from "./components/ChangePasswordModal";
 import { DeleteAccountModal } from "./components/DeleteAccountModal";
 import { ImportBookmarksModal } from "./components/ImportBookmarksModal";
+import { ExportBookmarksModal } from "./components/ExportBookmarksModal";
 import { useBookmarks } from "./hooks/useBookmarks";
 import type { Bookmark } from "../lib/bookmarks";
 
@@ -39,6 +40,7 @@ export default function App() {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const handleOpenAdd = () => {
     setEditingBookmark(null);
@@ -82,6 +84,7 @@ export default function App() {
         onChangePassword={() => setChangePasswordOpen(true)}
         onDeleteAccount={() => setDeleteAccountOpen(true)}
         onImportBookmarks={() => setImportOpen(true)}
+        onExportBookmarks={() => setExportOpen(true)}
       />
 
         <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 px-4 md:px-6 lg:px-8 pt-6 md:pt-8 pb-8">
@@ -114,7 +117,7 @@ export default function App() {
                       className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full text-sm shadow-lg shadow-purple-500/30 hover:scale-105 active:scale-95 transition-all duration-300"
                     >
                       <Upload className="w-4 h-4" />
-                      Import from CSV
+                      Import CSV or JSON
                     </button>
                     <span className="text-white/30 text-sm">or use the + button to add one</span>
                   </div>
@@ -198,6 +201,11 @@ export default function App() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={() => { setImportOpen(false); refresh(); }}
+      />
+
+      <ExportBookmarksModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
       />
     </div>
   );

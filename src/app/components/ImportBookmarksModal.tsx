@@ -8,9 +8,11 @@ import {
 } from "./ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
-import { validateCsvFile, parseCsvText, CsvParseError, type CsvParseResult, type ParsedCsvRow } from "../../lib/csv";
+import { validateCsvFile, parseCsvText, CsvParseError, type ParsedCsvRow } from "../../lib/csv";
+import { validateJsonFile, parseJsonExport, JsonImportError, type ParsedJsonBookmark } from "../../lib/importJson";
 import { getTags, createTag, setBookmarkTags } from "../../lib/tags";
 import { createBookmark } from "../../lib/bookmarks";
+import { uploadThumbnailFromBytes } from "../../lib/thumbnails";
 import { useAuth } from "../contexts/AuthContext";
 
 // ---------------------------------------------------------------------------
@@ -25,6 +27,49 @@ interface ImportBookmarksModalProps {
 
 type ModalState = "idle" | "parsed" | "importing" | "done";
 
+/** Unified bookmark shape used internally after parsing either format. */
+interface ImportRow {
+  title: string;
+  url: string;
+  tags: string[];
+  thumbnailUrl: string | null;
+  /** Decoded JPEG bytes from a JSON data URI — must be uploaded before creating bookmark. */
+  thumbnailData: Uint8Array | null;
+  thumbnailOriginalName: string | null;
+}
+
+interface ParsedResult {
+  format: "csv" | "json";
+  valid: ImportRow[];
+  skipped: Array<{ index: number; reason: string }>;
+}
+
+// ---------------------------------------------------------------------------
+// Converters
+// ---------------------------------------------------------------------------
+
+function csvRowToImportRow(row: ParsedCsvRow): ImportRow {
+  return {
+    title: row.title,
+    url: row.url,
+    tags: row.tags,
+    thumbnailUrl: row.thumbnailUrl,
+    thumbnailData: null,
+    thumbnailOriginalName: null,
+  };
+}
+
+function jsonRowToImportRow(row: ParsedJsonBookmark): ImportRow {
+  return {
+    title: row.title,
+    url: row.url,
+    tags: row.tags,
+    thumbnailUrl: row.thumbnailUrl,
+    thumbnailData: row.thumbnailData,
+    thumbnailOriginalName: row.thumbnailOriginalName,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -33,7 +78,7 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
   const { cryptoKey, userId } = useAuth();
 
   const [state, setState] = useState<ModalState>("idle");
-  const [parseResult, setParseResult] = useState<CsvParseResult | null>(null);
+  const [parseResult, setParseResult] = useState<ParsedResult | null>(null);
   const [parseError, setParseError] = useState<string>("");
   const [showFormat, setShowFormat] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -66,6 +111,41 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
 
     setParseError("");
 
+    const isJson = file.name.toLowerCase().endsWith(".json");
+    const isCsv = file.name.toLowerCase().endsWith(".csv");
+
+    if (!isJson && !isCsv) {
+      setParseError("The file must be a .csv or .json file.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (isJson) {
+      try {
+        validateJsonFile(file);
+      } catch (err) {
+        setParseError(err instanceof JsonImportError ? err.message : "Invalid file.");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+
+      const text = await file.text();
+      try {
+        const result = parseJsonExport(text);
+        setParseResult({
+          format: "json",
+          valid: result.valid.map(jsonRowToImportRow),
+          skipped: result.skipped,
+        });
+        setState("parsed");
+      } catch (err) {
+        setParseError(err instanceof JsonImportError ? err.message : "Could not parse JSON.");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+      return;
+    }
+
+    // CSV path
     try {
       validateCsvFile(file);
     } catch (err) {
@@ -75,10 +155,13 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
     }
 
     const text = await file.text();
-
     try {
       const result = parseCsvText(text);
-      setParseResult(result);
+      setParseResult({
+        format: "csv",
+        valid: result.valid.map(csvRowToImportRow),
+        skipped: result.skipped.map((s) => ({ index: s.rowNumber, reason: s.reason })),
+      });
       setState("parsed");
     } catch (err) {
       setParseError(err instanceof CsvParseError ? err.message : "Could not parse CSV.");
@@ -112,12 +195,12 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
       }
     }
 
-    // 3. Create each bookmark sequentially, bottom-up so that the first CSV
-    // row ends up with the newest created_at and appears at the top of the
-    // list (bookmarks are ordered created_at DESC).
+    // 3. Create each bookmark sequentially, bottom-up so that the first row
+    // ends up with the newest created_at and appears at the top of the list
+    // (bookmarks are ordered created_at DESC).
     let imported = 0;
     for (let i = rows.length - 1; i >= 0; i--) {
-      await createBookmarkRow(rows[i], tagMap, cryptoKey, userId);
+      await createImportRow(rows[i], tagMap, cryptoKey, userId);
       imported++;
       setProgress(imported);
     }
@@ -127,17 +210,39 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
     onImport();
   };
 
-  const createBookmarkRow = async (
-    row: ParsedCsvRow,
+  const createImportRow = async (
+    row: ImportRow,
     tagMap: Map<string, string>,
     key: CryptoKey,
     uid: string,
   ) => {
+    // Upload embedded thumbnail bytes (from JSON export) before creating the bookmark.
+    let thumbnailFileId: string | null = null;
+    if (row.thumbnailData) {
+      try {
+        thumbnailFileId = await uploadThumbnailFromBytes(
+          row.thumbnailData,
+          row.thumbnailOriginalName ?? "thumbnail.jpg",
+          key,
+          uid,
+        );
+      } catch {
+        // Upload failure: skip the thumbnail, still create the bookmark
+        thumbnailFileId = null;
+      }
+    }
+
     const { id } = await createBookmark(
-      { title: row.title, url: row.url, thumbnailUrl: row.thumbnailUrl },
+      {
+        title: row.title,
+        url: row.url,
+        thumbnailUrl: thumbnailFileId ? null : row.thumbnailUrl,
+        thumbnailFileId,
+      },
       key,
       uid,
     );
+
     const tagIds = row.tags
       .map((t) => tagMap.get(t.toLowerCase()))
       .filter((id): id is string => id !== undefined);
@@ -161,10 +266,10 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
 
   const renderIdle = () => (
     <div className="space-y-4">
-      {/* Hidden file input */}
+      {/* Hidden file input — accepts both CSV and JSON */}
       <input
         type="file"
-        accept=".csv"
+        accept=".csv,.json"
         className="hidden"
         ref={fileInputRef}
         onChange={handleFileChange}
@@ -177,7 +282,7 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
         className="w-full flex flex-col items-center gap-3 px-6 py-10 bg-white/5 border-2 border-dashed border-white/20 rounded-2xl hover:bg-white/10 hover:border-white/30 transition-all duration-300 text-center"
       >
         <Upload className="w-8 h-8 text-white/40" />
-        <span className="text-sm text-white/60">Choose CSV file</span>
+        <span className="text-sm text-white/60">Choose a CSV or JSON file</span>
         <span className="text-xs text-white/30">or drag and drop</span>
       </button>
 
@@ -192,33 +297,26 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
           onClick={() => setShowFormat((v) => !v)}
           className="w-full flex items-center justify-between px-4 py-3 text-sm text-white/50 hover:text-white/70 hover:bg-white/5 transition-all duration-200"
         >
-          <span>What format does my CSV need?</span>
+          <span>What file formats are supported?</span>
           {showFormat
             ? <ChevronUp className="w-4 h-4" />
             : <ChevronDown className="w-4 h-4" />
           }
         </button>
         {showFormat && (
-          <div className="px-4 pb-4 space-y-3 text-xs text-white/50 border-t border-white/10 pt-3">
+          <div className="px-4 pb-4 space-y-4 text-xs text-white/50 border-t border-white/10 pt-3">
             <div>
-              <p className="text-white/70 font-medium mb-1">Required columns</p>
+              <p className="text-white/70 font-medium mb-1">JSON (recommended)</p>
+              <p>Better Bookmarks export files (<span className="text-white/60">.json</span>). Restores all bookmark data including uploaded thumbnail images. Max 5,000 bookmarks, 100 MB.</p>
+            </div>
+            <div>
+              <p className="text-white/70 font-medium mb-1">CSV</p>
               <ul className="space-y-0.5 list-disc list-inside">
-                <li><span className="text-white/60">Title</span> — bookmark title</li>
-                <li><span className="text-white/60">URL</span> — must start with http:// or https://</li>
+                <li>Required: <span className="text-white/60">Title</span>, <span className="text-white/60">URL</span> (http/https)</li>
+                <li>Optional: <span className="text-white/60">Tags</span> (pipe-separated), <span className="text-white/60">Thumbnail URL</span></li>
               </ul>
+              <p className="mt-1">Max 500 rows, 5 MB.</p>
             </div>
-            <div>
-              <p className="text-white/70 font-medium mb-1">Optional columns</p>
-              <ul className="space-y-0.5 list-disc list-inside">
-                <li><span className="text-white/60">Tags</span> — pipe-separated (e.g. work|reading|tools)</li>
-                <li><span className="text-white/60">Thumbnail URL</span> — image URL for the bookmark card</li>
-              </ul>
-            </div>
-            <div>
-              <p className="text-white/70 font-medium mb-1">Ignored columns</p>
-              <p>ID, Description, Favicon URL, Created At, Updated At</p>
-            </div>
-            <p className="text-white/40">Max 500 rows · Max file size 5 MB</p>
           </div>
         )}
       </div>
@@ -227,15 +325,21 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
 
   const renderParsed = () => {
     const { valid, skipped } = parseResult!;
+    const hasThumbnails = valid.some((r) => r.thumbnailData !== null);
     return (
       <div className="space-y-4">
         <div className="p-4 bg-white/5 border border-white/10 rounded-2xl space-y-1">
           <p className="text-sm text-white/80">
             <span className="text-white font-medium">{valid.length} bookmark{valid.length !== 1 ? "s" : ""}</span> ready to import
           </p>
+          {hasThumbnails && (
+            <p className="text-xs text-white/50">
+              Thumbnail images will be encrypted and uploaded.
+            </p>
+          )}
           {skipped.length > 0 && (
             <p className="text-sm text-white/50">
-              {skipped.length} row{skipped.length !== 1 ? "s" : ""} will be skipped
+              {skipped.length} item{skipped.length !== 1 ? "s" : ""} will be skipped
             </p>
           )}
         </div>
@@ -243,7 +347,7 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
         {skipped.length > 0 && (
           <div className="max-h-36 overflow-y-auto space-y-1 p-3 bg-white/5 border border-white/10 rounded-2xl">
             {skipped.map((s) => (
-              <p key={s.rowNumber} className="text-xs text-amber-400/80">{s.reason}</p>
+              <p key={s.index} className="text-xs text-amber-400/80">{s.reason}</p>
             ))}
           </div>
         )}
@@ -281,7 +385,7 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
       </p>
       {parseResult && parseResult.skipped.length > 0 && (
         <p className="text-sm text-white/50">
-          {parseResult.skipped.length} row{parseResult.skipped.length !== 1 ? "s were" : " was"} skipped
+          {parseResult.skipped.length} item{parseResult.skipped.length !== 1 ? "s were" : " was"} skipped
         </p>
       )}
       <DialogClose asChild>

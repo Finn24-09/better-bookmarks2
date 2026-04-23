@@ -78,6 +78,36 @@ interface ThumbnailDataRow {
 // ---------------------------------------------------------------------------
 
 /**
+ * Encrypt and upload raw JPEG bytes (already decoded from a data URI).
+ * Skips the compress step — used when re-importing from a JSON export where
+ * the bytes were already compressed at export time.
+ * Returns the UUID of the newly created thumbnail_images row.
+ */
+export async function uploadThumbnailFromBytes(
+  bytes: Uint8Array,
+  originalName: string,
+  key: CryptoKey,
+  userId: string,
+): Promise<string> {
+  const [dataEnc, originalNameEnc] = await Promise.all([
+    encryptBinary(key, bytes),
+    encrypt(key, originalName),
+  ]);
+
+  const rows = await apiFetch<ThumbnailImageRow[]>('/thumbnail_images', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      user_id: userId,
+      data_enc: dataEnc,
+      original_name_enc: originalNameEnc,
+    }),
+  });
+
+  return rows[0].id;
+}
+
+/**
  * Compress, encrypt, and upload a thumbnail image.
  * Returns the UUID of the newly created thumbnail_images row.
  */

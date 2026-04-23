@@ -49,7 +49,7 @@ export async function decrypt(key: CryptoKey, encoded: string): Promise<string> 
  * The spread operator (`String.fromCharCode(...bytes)`) overflows the call
  * stack for arrays larger than ~100 KB, so we process in 8 KB chunks.
  */
-function bytesToBase64(bytes: Uint8Array): string {
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i += 8192) {
     binary += String.fromCharCode(...bytes.subarray(i, i + 8192));

@@ -41,6 +41,7 @@ export interface Bookmark {
 export interface GetBookmarksOptions {
   limit?: number;
   offset?: number;
+  signal?: AbortSignal;
 }
 
 export async function getBookmarks(
@@ -51,7 +52,9 @@ export async function getBookmarks(
   if (options.limit !== undefined) params.set('limit', String(options.limit));
   if (options.offset !== undefined) params.set('offset', String(options.offset));
 
-  const rows = await apiFetch<BookmarkRow[]>(`/bookmarks_with_tags?${params}`);
+  const rows = await apiFetch<BookmarkRow[]>(`/bookmarks_with_tags?${params}`, {
+    signal: options.signal,
+  });
   return Promise.all((rows ?? []).map((r) => decryptBookmark(r, key)));
 }
 

@@ -22,8 +22,13 @@ export interface Tag {
 // Fetch
 // ---------------------------------------------------------------------------
 
-export async function getTags(key: CryptoKey): Promise<Tag[]> {
-  const rows = await apiFetch<TagRow[]>('/tags?order=created_at.asc');
+export async function getTags(
+  key: CryptoKey,
+  options?: { signal?: AbortSignal },
+): Promise<Tag[]> {
+  const rows = await apiFetch<TagRow[]>('/tags?order=created_at.asc', {
+    signal: options?.signal,
+  });
   return Promise.all(
     rows.map(async (r) => ({ id: r.id, name: await decrypt(key, r.name_enc) })),
   );
