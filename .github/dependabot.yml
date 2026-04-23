@@ -1,0 +1,42 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Berlin"
+    groups:
+      # All patch and minor updates bundled into one PR per week — safe to approve quickly.
+      # React, Vite, and Tailwind are excluded so they get isolated PRs for careful review.
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+        exclude-patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "vite"
+      # React ecosystem gets its own PR — major version changes require code migration.
+      react-core:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      # Build toolchain isolated — Vite major upgrades can affect config and security posture.
+      vite-toolchain:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "@tailwindcss/*"
+          - "tailwindcss"
+          - "vitest"
+    labels:
+      - "dependencies"
+    # Security advisories will open PRs immediately, overriding the weekly schedule.
+    # 10 PRs open at once is enough for a weekly batch + any emergency security fixes.
+    open-pull-requests-limit: 10

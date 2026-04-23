@@ -1,4 +1,4 @@
-import { forwardRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { motion, AnimatePresence } from "motion/react";
@@ -17,10 +17,11 @@ interface InputFieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   icon: React.ElementType;
   rightSlot?: React.ReactNode;
   error?: string;
+  ref?: React.Ref<HTMLInputElement>;
 }
 
-const InputField = forwardRef<HTMLInputElement, InputFieldProps>(
-  ({ icon: Icon, rightSlot, error, className, ...rest }, ref) => (
+function InputField({ icon: Icon, rightSlot, error, className, ref, ...rest }: InputFieldProps) {
+  return (
     <div className="space-y-1">
       <div className="relative">
         <Icon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
@@ -42,9 +43,8 @@ const InputField = forwardRef<HTMLInputElement, InputFieldProps>(
       </div>
       {error && <p className="text-xs text-red-400 pl-1">{error}</p>}
     </div>
-  ),
-);
-InputField.displayName = "InputField";
+  );
+}
 
 interface EyeToggleProps {
   show: boolean;
