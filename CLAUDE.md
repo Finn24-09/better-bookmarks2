@@ -1,10 +1,10 @@
 # Better Bookmarks 2 — Claude Context
 
 ## Project Overview
-A React bookmark management app with a dark glassmorphic design, backed by PostgreSQL + PostgREST with client-side E2E encryption.
+A self-hosted React bookmark manager with a dark glassmorphic design, backed by PostgreSQL + PostgREST with client-side AES-256-GCM end-to-end encryption. The server stores only ciphertext and never holds an encryption key.
 
-**Stack:** React 18 + TypeScript + Vite + Tailwind CSS v4 + lucide-react icons
-**Key deps:** react-hook-form, react-dnd, next-themes, sonner (toasts), motion (animations), Radix UI components
+**Stack:** React 19 + TypeScript + Vite 8 + Tailwind CSS v4 + lucide-react icons  
+**Key deps:** react-hook-form, react-dnd, next-themes, sonner (toasts), motion (animations), Radix UI components, react-router v7  
 **Test stack:** Vitest 4 + jsdom + @testing-library/react + @testing-library/jest-dom
 
 ---
@@ -21,7 +21,7 @@ This project is developed test-first. This is a hard rule, not a suggestion.
 
 **Test commands:**
 ```bash
-npm test          # single run (CI / before committing)
+npm test            # single run (CI / before committing)
 npm run test:watch  # watch mode during development
 ```
 
@@ -32,15 +32,97 @@ npm run test:watch  # watch mode during development
 | `src/app/hooks/useBar.ts` | `src/app/hooks/useBar.test.ts` |
 | `src/app/contexts/BazContext.tsx` | `src/app/contexts/BazContext.test.tsx` |
 
-**What to test (from the project plan):**
+**What to test:**
 - `src/lib/crypto.ts` — round-trip encrypt/decrypt, random IVs, exportKey/importKey, HMAC determinism
 - `src/lib/auth.ts` — fetch mocks for signIn success/failure, signUp duplicate email
-- `src/app/contexts/AuthContext.tsx` — login sets state + storage, logout clears both, session restore on remount
+- `src/app/contexts/AuthContext.tsx` — login sets state, logout clears both token and key, no persistence to storage
 - `src/lib/bookmarks.ts` — createBookmark sends `user_id` + encrypted fields; updateBookmark sends PATCH to correct URL
 - `src/lib/tags.ts` — createTag sends `user_id` + `name_enc` + correct `name_hmac`; setBookmarkTags diffs correctly
 - `src/app/hooks/useBookmarks.ts` — pagination params, loadMore offset, hasMore logic, client-side search/filter/AND logic
 
 **Why this matters:** The missing `user_id` bug in `createBookmark` and `createTag` that caused the RLS violation in production was not caught because these tests were not written first. Tests for request body content would have failed immediately and exposed the omission before any manual testing was needed.
+
+---
+
+## Architecture & Routing
+
+```
+src/
+├── main.tsx                          # React 19 entry; mounts AuthProvider + router
+├── app/
+│   ├── router.tsx                    # Two routes: / (App) and /auth (AuthPage)
+│   ├── App.tsx                       # Root layout: search/filter state, infinite scroll, bookmark grid
+│   ├── AuthPage.tsx                  # Animated sign in / sign up (desktop overlay, mobile tabs)
+│   ├── contexts/AuthContext.tsx      # In-memory auth state: token, userId, email, cryptoKey
+│   ├── hooks/useBookmarks.ts         # Pagination, search/filter, thumbnail cache, loadMore
+│   └── components/                   # UI components (see Component Inventory below)
+└── lib/
+    ├── api.ts          # apiFetch wrapper, in-memory JWT, error sanitization
+    ├── auth.ts         # signIn / signUp / changePassword / deleteAccount RPCs
+    ├── bookmarks.ts    # getBookmarks / createBookmark / updateBookmark / deleteBookmark / reencryptBookmark
+    ├── tags.ts         # getTags / createTag / deleteTag / reencryptTag / setBookmarkTags
+    ├── thumbnails.ts   # compressImage / uploadThumbnail / fetchThumbnailObjectUrl / reencryptThumbnail
+    ├── crypto.ts       # deriveKey / encrypt / decrypt / encryptBinary / decryptBinary / computeHmac
+    ├── export.ts       # exportBookmarks / exportToCsv / triggerDownload
+    ├── csv.ts          # parseCsvText / validateCsvFile (RFC 4180, no deps)
+    └── importJson.ts   # parseJsonExport / validateJsonFile
+```
+
+**Routing:** React Router v7. `/` requires auth (redirects to `/auth` if no session). `/auth` redirects to `/` if already authenticated.
+
+**Dev proxy:** Vite proxies `/api/*` → `http://localhost:3000` (strips `/api` prefix). PostgREST must run on port 3000 locally. Production uses the Nginx reverse proxy in `docker/frontend/nginx.conf`.
+
+---
+
+## Security Model — CRITICAL INVARIANTS
+
+Never break these. They are the core of the zero-knowledge architecture.
+
+- **Encryption key** — derived via `deriveKey(password, email)` (PBKDF2-SHA256, 600k iterations, non-extractable). Stored only in `AuthContext` state. **Never written to localStorage, sessionStorage, cookies, or sent over the network.**
+- **JWT** — stored only in a module-level variable in `api.ts`. **Never written to any persistent storage.** Both key and token are wiped on logout.
+- **Encrypted fields** — `title_enc`, `url_enc`, `thumbnail_url_enc`, `name_enc`, `data_enc`, `original_name_enc`. Always call `encrypt(key, value)` before sending and `decrypt(key, value)` after receiving. Never send plaintext to the API.
+- **HMAC tag deduplication** — `name_hmac = HMAC-SHA256(userId, tagName)`. The DB enforces `UNIQUE(user_id, name_hmac)` for tags without ever seeing the plaintext name. Always include `name_hmac` when creating a tag.
+- **`user_id` in mutations** — always include `user_id` in POST bodies for `bookmarks`, `tags`, and `thumbnail_images`. RLS enforces ownership but PostgREST needs the field in the body.
+- **Password change = key rotation** — changing password requires re-encrypting ALL bookmarks, tags, and thumbnails with the new key before calling the `change_password` RPC. The order matters: re-encrypt data first, then update credentials.
+- **API error sanitization** — only 400/401/409 relay PostgREST messages. All other errors get a generic message. Do not change this without understanding the schema leakage risk.
+
+---
+
+## Data Model
+
+The frontend talks to these PostgREST-exposed resources:
+
+| Resource | Method | Notes |
+|---|---|---|
+| `bookmarks` | POST / PATCH / DELETE | Encrypted fields: `title_enc`, `url_enc`, `thumbnail_url_enc` |
+| `bookmarks_with_tags` | GET | View; includes `tag_ids UUID[]` array |
+| `tags` | GET / POST / PATCH / DELETE | Encrypted: `name_enc`; HMAC: `name_hmac` |
+| `bookmark_tags` | POST / DELETE | Junction table: `bookmark_id`, `tag_id` |
+| `thumbnail_images` | GET / POST / PATCH / DELETE | Encrypted binary: `data_enc`, `original_name_enc` |
+| `/rpc/sign_in` | POST | Returns `{ token, user_id }` |
+| `/rpc/sign_up` | POST | Returns `{ token, user_id }` |
+| `/rpc/change_password` | POST | Call only after all re-encryption is done |
+| `/rpc/delete_account` | POST | Hard delete; password-confirmed |
+
+Bookmark listing always reads from `bookmarks_with_tags`, not `bookmarks` directly.
+
+---
+
+## Key Library Behaviours
+
+### `useBookmarks` hook
+- **Unfiltered:** fetches paginated (page size 20), infinite scroll via IntersectionObserver sentinel.
+- **Filtered (search or tag active):** fetches ALL bookmarks, filters client-side with AND logic (search AND tag). Infinite scroll disabled.
+- Thumbnail object URLs are cached in a `thumbCache` ref; all URLs are revoked on unmount.
+
+### `setBookmarkTags`
+Diffs desired vs current tag IDs. Only POSTs new associations and DELETEs removed ones. Never re-inserts unchanged tags.
+
+### CSV import limits
+Max 5 MB, max 500 rows. Required columns: `title`, `url`. Optional: `tags` (pipe-separated), `thumbnail url`.
+
+### JSON import/export limits
+Import: max 100 MB, max 5000 bookmarks. Export: paginated 100/page, thumbnail concurrency capped at 3, cancellable via AbortSignal.
 
 ---
 
@@ -96,15 +178,21 @@ fixed bottom-6 left-1/2 -translate-x-1/2 z-40
 
 | File | Purpose |
 |---|---|
-| `src/app/App.tsx` | Root — layout shell, dummy data, grid |
-| `src/app/components/Header.tsx` | Sticky glassmorphic header, title + user icon |
-| `src/app/components/SearchBar.tsx` | Full-width glassmorphic search input |
+| `src/app/App.tsx` | Root — layout shell, search/filter state, infinite scroll, bookmark grid |
+| `src/app/AuthPage.tsx` | Sign in / sign up — animated desktop overlay + mobile tab switcher |
+| `src/app/components/Header.tsx` | Sticky glassmorphic header, title + user account menu |
+| `src/app/components/SearchBar.tsx` | Full-width glassmorphic search input (controlled) |
 | `src/app/components/TagFilter.tsx` | Collapsible tag pill panel (shows 5, expand for all) |
-| `src/app/components/BookmarkCard.tsx` | Glassmorphic card: aspect-video thumbnail, title, URL, tags |
-| `src/app/components/AddBookmarkButton.tsx` | Purple gradient FAB with Plus icon |
+| `src/app/components/BookmarkCard.tsx` | Glassmorphic card: aspect-video thumbnail, title, URL, tags, edit/delete |
+| `src/app/components/AddBookmarkButton.tsx` | Purple gradient FAB fixed to grid right edge |
 | `src/app/components/FloatingFooter.tsx` | Fixed centered pill: version + GitHub link |
-| `src/app/components/figma/ImageWithFallback.tsx` | `<img>` with SVG error state fallback |
-| `src/styles/theme.css` | CSS custom properties for light/dark theme + Tailwind theme export |
+| `src/app/components/BookmarkFormModal.tsx` | Add / edit bookmark form (react-hook-form + TagMultiSelect) |
+| `src/app/components/TagMultiSelect.tsx` | Multi-select tag input with create-on-type |
+| `src/app/components/ImportBookmarksModal.tsx` | CSV + JSON import UI with validation feedback |
+| `src/app/components/ExportBookmarksModal.tsx` | JSON + CSV export with progress bar and cancel |
+| `src/app/components/ChangePasswordModal.tsx` | Password change — triggers full re-encryption pipeline |
+| `src/app/components/DeleteAccountModal.tsx` | Password-confirmed hard account delete |
+| `src/app/components/ui/` | Full Radix UI primitive set (shadcn-style wrappers) |
 
 ---
 
