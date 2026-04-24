@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { X, AlertTriangle, Trash2 } from "lucide-react";
+import { X, AlertTriangle, Trash2, Eye, EyeOff } from "lucide-react";
+import { toast } from "sonner";
 import { useNavigate } from "react-router";
 import {
   Dialog,
@@ -23,15 +24,14 @@ export function DeleteAccountModal({ open, onClose }: DeleteAccountModalProps) {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [holding, setHolding] = useState(false);
-  const [error, setError] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleClose = () => {
     setHolding(false);
     setPassword("");
-    setError("");
     onClose();
   };
 
@@ -41,18 +41,17 @@ export function DeleteAccountModal({ open, onClose }: DeleteAccountModalProps) {
       timerRef.current = setTimeout(async () => {
         setHolding(false);
         if (!password) {
-          setError("Please enter your password to confirm deletion");
+          toast.error("Please enter your password to confirm deletion");
           return;
         }
         setIsDeleting(true);
-        setError("");
         try {
           await deleteAccount(password);
           logout();
           navigate("/login", { replace: true });
         } catch (err) {
           setIsDeleting(false);
-          setError(err instanceof Error ? err.message : "Failed to delete account");
+          toast.error(err instanceof Error ? err.message : "Could not delete account. Please check your password.");
         }
       }, HOLD_DURATION);
     } else {
@@ -113,17 +112,25 @@ export function DeleteAccountModal({ open, onClose }: DeleteAccountModalProps) {
           {/* Password confirmation */}
           <div className="mt-5 space-y-1.5">
             <label className="text-sm text-white/70">Confirm your password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password…"
-              autoComplete="current-password"
-              className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password…"
+                autoComplete="current-password"
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 pr-11 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setShowPassword((s) => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors duration-300"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
-
-          {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
 
           {/* Footer */}
           <div className="space-y-3 mt-5">

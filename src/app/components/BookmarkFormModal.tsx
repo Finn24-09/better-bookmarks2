@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { X, Trash2, Upload } from "lucide-react";
+import { toast } from "sonner";
 import { TagMultiSelect } from "./TagMultiSelect";
 import {
   Dialog,
@@ -50,7 +51,6 @@ export function BookmarkFormModal({
   const isEditing = !!initialData;
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(initialData?.tagIds ?? []);
   const [localTags, setLocalTags] = useState<Tag[]>(availableTags);
-  const [apiError, setApiError] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Thumbnail file upload state
@@ -92,7 +92,6 @@ export function BookmarkFormModal({
   useEffect(() => {
     if (open) {
       setSelectedTagIds(initialData?.tagIds ?? []);
-      setApiError("");
       setIsDeleting(false);
       setThumbMode(initialData?.thumbnailFileId ? "file" : "url");
       setPendingFileId(initialData?.thumbnailFileId ?? null);
@@ -114,7 +113,6 @@ export function BookmarkFormModal({
       deleteThumbnailImage(idToDelete).catch(() => {}); // fire-and-forget
     }
     reset();
-    setApiError("");
     onClose();
   };
 
@@ -135,7 +133,7 @@ export function BookmarkFormModal({
       setPendingFileName(file.name);
       setThumbMode("file");
     } catch {
-      setApiError("Failed to upload image");
+      toast.error("Could not upload image. Please try again.");
     }
   };
 
@@ -152,7 +150,6 @@ export function BookmarkFormModal({
 
   const onSubmit = async (data: FormFields) => {
     if (!cryptoKey || !userId) return;
-    setApiError("");
     try {
       // If the user replaced or removed an existing saved thumbnail, delete the
       // old image now that the save is confirmed.
@@ -178,14 +175,13 @@ export function BookmarkFormModal({
       onSave();
       handleClose();
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : "Failed to save bookmark");
+      toast.error(err instanceof Error ? err.message : "Could not save bookmark. Please try again.");
     }
   };
 
   const handleDelete = async () => {
     if (!initialData) return;
     setIsDeleting(true);
-    setApiError("");
     try {
       await deleteBookmark(initialData.id);
       // Delete the associated thumbnail file after the bookmark is gone.
@@ -196,7 +192,7 @@ export function BookmarkFormModal({
       handleClose();
     } catch (err) {
       setIsDeleting(false);
-      setApiError(err instanceof Error ? err.message : "Failed to delete bookmark");
+      toast.error(err instanceof Error ? err.message : "Could not delete bookmark. Please try again.");
     }
   };
 
@@ -339,7 +335,6 @@ export function BookmarkFormModal({
                 />
               </div>
 
-              {apiError && <p className="text-sm text-red-400">{apiError}</p>}
             </div>
 
             {/* Footer Buttons */}

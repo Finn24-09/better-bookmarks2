@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
-import { X } from "lucide-react";
+import { X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -10,6 +10,7 @@ import {
 } from "./ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
+import { PasswordStrengthHints } from "./PasswordStrengthHints";
 import { changePassword, signIn } from "../../lib/auth";
 import { deriveKey } from "../../lib/crypto";
 import { getBookmarks, reencryptBookmark } from "../../lib/bookmarks";
@@ -37,7 +38,9 @@ function validatePasswordComplexity(v: string): true | string {
 
 export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps) {
   const { email, cryptoKey, updateKey } = useAuth();
-  const [apiError, setApiError] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   // Explicit latch prevents concurrent submissions if isSubmitting resets mid-flight.
   const isRotatingRef = useRef(false);
 
@@ -51,14 +54,12 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
 
   const handleClose = () => {
     reset();
-    setApiError("");
     onClose();
   };
 
   const onSubmit = async (data: FormFields) => {
     if (isRotatingRef.current) return;
     isRotatingRef.current = true;
-    setApiError("");
 
     try {
       if (!cryptoKey || !email) throw new Error("Not authenticated");
@@ -98,7 +99,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
       toast.success("Password updated");
       handleClose();
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : "Failed to change password");
+      toast.error(err instanceof Error ? err.message : "Could not change password. Check your current password and try again.");
     } finally {
       isRotatingRef.current = false;
     }
@@ -140,13 +141,23 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-sm text-white/70">Current Password</label>
-                <input
-                  type="password"
-                  placeholder="Enter current password…"
-                  autoComplete="current-password"
-                  className={errors.currentPassword ? errorInputCls : inputCls}
-                  {...register("currentPassword", { required: "Required" })}
-                />
+                <div className="relative">
+                  <input
+                    type={showCurrent ? "text" : "password"}
+                    placeholder="Enter current password…"
+                    autoComplete="current-password"
+                    className={cn(errors.currentPassword ? errorInputCls : inputCls, "pr-11")}
+                    {...register("currentPassword", { required: "Required" })}
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowCurrent((s) => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors duration-300"
+                  >
+                    {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
                 {errors.currentPassword && (
                   <p className="text-xs text-red-400">{errors.currentPassword.message}</p>
                 )}
@@ -154,40 +165,59 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
 
               <div className="space-y-1.5">
                 <label className="text-sm text-white/70">New Password</label>
-                <input
-                  type="password"
-                  placeholder="Enter new password…"
-                  autoComplete="new-password"
-                  className={errors.newPassword ? errorInputCls : inputCls}
-                  {...register("newPassword", {
-                    required: "Required",
-                    minLength: { value: 12, message: "At least 12 characters" },
-                    validate: validatePasswordComplexity,
-                  })}
-                />
+                <div className="relative">
+                  <input
+                    type={showNew ? "text" : "password"}
+                    placeholder="Enter new password…"
+                    autoComplete="new-password"
+                    className={cn(errors.newPassword ? errorInputCls : inputCls, "pr-11")}
+                    {...register("newPassword", {
+                      required: "Required",
+                      minLength: { value: 12, message: "At least 12 characters" },
+                      validate: validatePasswordComplexity,
+                    })}
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowNew((s) => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors duration-300"
+                  >
+                    {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
                 {errors.newPassword && (
                   <p className="text-xs text-red-400">{errors.newPassword.message}</p>
                 )}
+                <PasswordStrengthHints password={watch("newPassword") ?? ""} />
               </div>
 
               <div className="space-y-1.5">
                 <label className="text-sm text-white/70">Confirm New Password</label>
-                <input
-                  type="password"
-                  placeholder="Retype new password…"
-                  autoComplete="new-password"
-                  className={errors.confirmPassword ? errorInputCls : inputCls}
-                  {...register("confirmPassword", {
-                    required: "Required",
-                    validate: (v) => v === watch("newPassword") || "Passwords do not match",
-                  })}
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirm ? "text" : "password"}
+                    placeholder="Retype new password…"
+                    autoComplete="new-password"
+                    className={cn(errors.confirmPassword ? errorInputCls : inputCls, "pr-11")}
+                    {...register("confirmPassword", {
+                      required: "Required",
+                      validate: (v) => v === watch("newPassword") || "Passwords do not match",
+                    })}
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowConfirm((s) => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors duration-300"
+                  >
+                    {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
                 {errors.confirmPassword && (
                   <p className="text-xs text-red-400">{errors.confirmPassword.message}</p>
                 )}
               </div>
-
-              {apiError && <p className="text-sm text-red-400">{apiError}</p>}
             </div>
 
             {/* Footer */}

@@ -23,7 +23,12 @@ vi.mock('../../lib/auth', () => ({
   deleteAccount: vi.fn(),
 }));
 
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
+
 import { deleteAccount } from '../../lib/auth';
+import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
 
@@ -83,7 +88,7 @@ describe('DeleteAccountModal', () => {
       await vi.runAllTimersAsync();
     });
 
-    expect(screen.getByText(/please enter your password/i)).toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalledWith('Please enter your password to confirm deletion');
     expect(deleteAccount).not.toHaveBeenCalled();
 
     fireEvent.mouseUp(holdButton);
@@ -130,7 +135,7 @@ describe('DeleteAccountModal', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true });
   });
 
-  it('shows error message when deleteAccount rejects', async () => {
+  it('shows a toast error when deleteAccount rejects', async () => {
     vi.useFakeTimers();
     vi.mocked(deleteAccount).mockRejectedValue(new Error('Invalid credentials'));
     renderModal();
@@ -146,7 +151,7 @@ describe('DeleteAccountModal', () => {
       await vi.runAllTimersAsync();
     });
 
-    expect(screen.getByText('Invalid credentials')).toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalledWith('Invalid credentials');
   });
 
   it('button shows "Deleting\u2026" while the deletion is in progress', async () => {

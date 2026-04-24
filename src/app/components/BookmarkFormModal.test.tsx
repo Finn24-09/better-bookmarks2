@@ -30,9 +30,14 @@ vi.mock('../../lib/thumbnails', () => ({
   deleteThumbnailImage: vi.fn(),
 }));
 
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
+
 import { createBookmark, updateBookmark, deleteBookmark } from '../../lib/bookmarks';
 import { setBookmarkTags } from '../../lib/tags';
 import { uploadThumbnail, deleteThumbnailImage } from '../../lib/thumbnails';
+import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
 
@@ -231,7 +236,7 @@ describe('BookmarkFormModal', () => {
     resolveFn({ id: 'bm-new' });
   });
 
-  it('shows the API error message when createBookmark rejects', async () => {
+  it('shows a toast error when createBookmark rejects', async () => {
     vi.mocked(createBookmark).mockRejectedValue(new Error('Server error'));
     const user = userEvent.setup();
     renderAdd();
@@ -241,7 +246,7 @@ describe('BookmarkFormModal', () => {
     await user.click(screen.getByRole('button', { name: /^save$/i }));
 
     await waitFor(() =>
-      expect(screen.getByText('Server error')).toBeInTheDocument(),
+      expect(toast.error).toHaveBeenCalledWith('Server error'),
     );
   });
 

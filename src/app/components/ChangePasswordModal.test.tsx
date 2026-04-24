@@ -51,6 +51,7 @@ import { deriveKey } from '../../lib/crypto';
 import { getBookmarks, reencryptBookmark } from '../../lib/bookmarks';
 import { getTags, reencryptTag } from '../../lib/tags';
 import { reencryptThumbnail } from '../../lib/thumbnails';
+import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -280,7 +281,7 @@ describe('ChangePasswordModal', () => {
     resolveFn();
   });
 
-  it('shows the API error message when changePassword rejects', async () => {
+  it('shows the API error message as a toast when changePassword rejects', async () => {
     vi.mocked(changePassword).mockRejectedValue(new Error('Wrong password'));
     const user = userEvent.setup();
     renderModal();
@@ -291,7 +292,51 @@ describe('ChangePasswordModal', () => {
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() =>
-      expect(screen.getByText('Wrong password')).toBeInTheDocument(),
+      expect(toast.error).toHaveBeenCalledWith('Wrong password'),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Show / hide password toggles
+  // -------------------------------------------------------------------------
+  it('eye toggle on "New Password" changes input type from "password" to "text"', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    const newPasswordInput = screen.getByPlaceholderText('Enter new password…');
+    expect(newPasswordInput).toHaveAttribute('type', 'password');
+
+    const eyeToggle = newPasswordInput.closest('.relative')!.querySelector('button');
+    await user.click(eyeToggle!);
+
+    expect(newPasswordInput).toHaveAttribute('type', 'text');
+  });
+
+  it('eye toggle on "Current Password" changes input type from "password" to "text"', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    const currentPasswordInput = screen.getByPlaceholderText('Enter current password…');
+    expect(currentPasswordInput).toHaveAttribute('type', 'password');
+
+    const eyeToggle = currentPasswordInput.closest('.relative')!.querySelector('button');
+    await user.click(eyeToggle!);
+
+    expect(currentPasswordInput).toHaveAttribute('type', 'text');
+  });
+
+  // -------------------------------------------------------------------------
+  // Password strength hints
+  // -------------------------------------------------------------------------
+  it('shows password strength hints for the new password field after typing', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'abc');
+
+    expect(screen.getByText('12+ characters')).toBeInTheDocument();
+    expect(screen.getByText('Uppercase letter (A–Z)')).toBeInTheDocument();
+    expect(screen.getByText('Lowercase letter (a–z)')).toBeInTheDocument();
+    expect(screen.getByText('Number or symbol')).toBeInTheDocument();
   });
 });

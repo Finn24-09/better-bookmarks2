@@ -3,7 +3,9 @@ import { useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { motion, AnimatePresence } from "motion/react";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { toast } from "sonner";
 import { FloatingFooter } from "./components/FloatingFooter";
+import { PasswordStrengthHints } from "./components/PasswordStrengthHints";
 import { cn } from "./components/ui/utils";
 import { signIn, signUp } from "../lib/auth";
 import { deriveKey } from "../lib/crypto";
@@ -92,7 +94,6 @@ interface RegisterFields {
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
-  const [apiError, setApiError] = useState("");
 
   const {
     register,
@@ -101,14 +102,13 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   } = useForm<LoginFields>();
 
   const onSubmit = async (data: LoginFields) => {
-    setApiError("");
     try {
       const result = await signIn(data.email, data.password);
       const cryptoKey = await deriveKey(data.password, data.email);
       login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
       onSuccess();
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : "Sign in failed");
+      toast.error(err instanceof Error ? err.message : "Incorrect email or password");
     }
   };
 
@@ -143,7 +143,6 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
           </button>
         </div>
       </div>
-      {apiError && <p className="text-xs text-red-400">{apiError}</p>}
       <button type="submit" disabled={isSubmitting} className={primaryBtn}>
         {isSubmitting ? "Signing in…" : "Sign In"}
       </button>
@@ -159,7 +158,6 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
   const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [apiError, setApiError] = useState("");
 
   const {
     register,
@@ -168,15 +166,16 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
     formState: { errors, isSubmitting },
   } = useForm<RegisterFields>();
 
+  const passwordValue = watch("password") ?? "";
+
   const onSubmit = async (data: RegisterFields) => {
-    setApiError("");
     try {
       const result = await signUp(data.email, data.password);
       const cryptoKey = await deriveKey(data.password, data.email);
       login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
       onSuccess();
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : "Sign up failed");
+      toast.error(err instanceof Error ? err.message : "Could not create account. Try again.");
     }
   };
 
@@ -190,26 +189,29 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
         error={errors.email?.message}
         {...register("email", { required: "Email is required" })}
       />
-      <InputField
-        type={showPassword ? "text" : "password"}
-        placeholder="Password"
-        icon={Lock}
-        autoComplete="new-password"
-        error={errors.password?.message}
-        rightSlot={
-          <EyeToggle show={showPassword} onToggle={() => setShowPassword((s) => !s)} />
-        }
-        {...register("password", {
-          required: "Password is required",
-          minLength: { value: 12, message: "At least 12 characters" },
-          validate: (v) => {
-            if (!/[A-Z]/.test(v)) return "Must include an uppercase letter";
-            if (!/[a-z]/.test(v)) return "Must include a lowercase letter";
-            if (!/[^a-zA-Z]/.test(v)) return "Must include a number or symbol";
-            return true;
-          },
-        })}
-      />
+      <div>
+        <InputField
+          type={showPassword ? "text" : "password"}
+          placeholder="Password"
+          icon={Lock}
+          autoComplete="new-password"
+          error={errors.password?.message}
+          rightSlot={
+            <EyeToggle show={showPassword} onToggle={() => setShowPassword((s) => !s)} />
+          }
+          {...register("password", {
+            required: "Password is required",
+            minLength: { value: 12, message: "At least 12 characters" },
+            validate: (v) => {
+              if (!/[A-Z]/.test(v)) return "Must include an uppercase letter";
+              if (!/[a-z]/.test(v)) return "Must include a lowercase letter";
+              if (!/[^a-zA-Z]/.test(v)) return "Must include a number or symbol";
+              return true;
+            },
+          })}
+        />
+        <PasswordStrengthHints password={passwordValue} />
+      </div>
       <InputField
         type={showConfirm ? "text" : "password"}
         placeholder="Confirm password"
@@ -224,7 +226,6 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
           validate: (v) => v === watch("password") || "Passwords do not match",
         })}
       />
-      {apiError && <p className="text-xs text-red-400">{apiError}</p>}
       <button type="submit" disabled={isSubmitting} className={primaryBtn}>
         {isSubmitting ? "Creating account…" : "Create Account"}
       </button>

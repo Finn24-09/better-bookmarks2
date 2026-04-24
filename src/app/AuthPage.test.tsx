@@ -4,6 +4,10 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { AuthPage } from './AuthPage';
 
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
+
 // ---------------------------------------------------------------------------
 // Hoisted mocks
 // ---------------------------------------------------------------------------
@@ -30,6 +34,7 @@ vi.mock('../lib/crypto', () => ({
 
 import { signIn, signUp } from '../lib/auth';
 import { deriveKey } from '../lib/crypto';
+import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
 
@@ -127,7 +132,7 @@ describe('AuthPage', () => {
     await user.click(screen.getAllByRole('button', { name: /^sign in$/i })[0]);
 
     await waitFor(() =>
-      expect(screen.getAllByText('Invalid credentials').length).toBeGreaterThan(0),
+      expect(toast.error).toHaveBeenCalledWith('Invalid credentials'),
     );
   });
 
@@ -229,7 +234,23 @@ describe('AuthPage', () => {
     await user.click(screen.getAllByRole('button', { name: /create account/i })[0]);
 
     await waitFor(() =>
-      expect(screen.getAllByText('Email already in use').length).toBeGreaterThan(0),
+      expect(toast.error).toHaveBeenCalledWith('Email already in use'),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Register form – password strength hints
+  // -------------------------------------------------------------------------
+
+  it('shows password strength hints in the register form after typing', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getAllByPlaceholderText('Password')[1], 'abc');
+
+    expect(screen.getAllByText('12+ characters').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Uppercase letter (A–Z)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Lowercase letter (a–z)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Number or symbol').length).toBeGreaterThan(0);
   });
 });

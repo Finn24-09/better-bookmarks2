@@ -96,6 +96,19 @@ describe('apiFetch', () => {
     expect(err.message).toBe('You do not have permission to perform this action.');
   });
 
+  it('throws ApiError with PostgREST message for 403 on auth RPCs (wrong current password)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ message: 'Invalid credentials' }),
+    }));
+
+    await expect(apiFetch('/rpc/change_password')).rejects.toMatchObject({
+      status: 403,
+      message: 'Invalid credentials',
+    });
+  });
+
   it('throws ApiError with PostgREST message for 401 on auth RPCs (sign_in error is user-friendly)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
