@@ -79,7 +79,7 @@ export default function App() {
   const tagNameById = Object.fromEntries(tags.map((t) => [t.id, t.name]));
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950">
+    <div className="min-h-screen bg-linear-to-br from-slate-950 via-purple-950 to-slate-950">
       <Header
         onChangePassword={() => setChangePasswordOpen(true)}
         onDeleteAccount={() => setDeleteAccountOpen(true)}
@@ -114,7 +114,7 @@ export default function App() {
                   <div className="flex flex-col sm:flex-row items-center gap-3">
                     <button
                       onClick={() => setImportOpen(true)}
-                      className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full text-sm shadow-lg shadow-purple-500/30 hover:scale-105 active:scale-95 transition-all duration-300"
+                      className="flex items-center gap-2 px-5 py-2.5 bg-linear-to-br from-purple-600 to-purple-800 text-white rounded-full text-sm shadow-lg shadow-purple-500/30 hover:scale-105 active:scale-95 transition-all duration-300"
                     >
                       <Upload className="w-4 h-4" />
                       Import CSV or JSON

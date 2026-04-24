@@ -36,7 +36,7 @@ describe('compressImage', () => {
     } as unknown as CanvasRenderingContext2D);
 
     vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(
-      function (this: HTMLCanvasElement, callback, type, quality) {
+      function (this: HTMLCanvasElement, callback, type, _quality) {
         // Return a tiny fake blob that represents the compressed image
         callback(new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: type ?? 'image/jpeg' }));
       },

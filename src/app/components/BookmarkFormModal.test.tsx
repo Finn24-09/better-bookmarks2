@@ -218,9 +218,9 @@ describe('BookmarkFormModal', () => {
   });
 
   it('Save button shows "Saving\u2026" while the promise is pending', async () => {
-    let resolveFn!: (v: unknown) => void;
+    let resolveFn!: (v: { id: string } | PromiseLike<{ id: string }>) => void;
     vi.mocked(createBookmark).mockImplementation(
-      () => new Promise((res) => { resolveFn = res; }),
+      () => new Promise<{ id: string }>((res) => { resolveFn = res; }),
     );
     const user = userEvent.setup();
     renderAdd();
@@ -261,7 +261,6 @@ describe('BookmarkFormModal', () => {
 
   it('after uploading a file, shows the filename chip and hides the URL input', async () => {
     vi.mocked(uploadThumbnail).mockResolvedValue('img-new');
-    const user = userEvent.setup();
     renderAdd();
 
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -354,7 +353,6 @@ describe('BookmarkFormModal', () => {
     vi.mocked(uploadThumbnail)
       .mockResolvedValueOnce('img-first')
       .mockResolvedValueOnce('img-second');
-    const user = userEvent.setup();
     renderAdd();
 
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;

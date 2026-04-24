@@ -84,7 +84,7 @@ interface ThumbnailDataRow {
  * Returns the UUID of the newly created thumbnail_images row.
  */
 export async function uploadThumbnailFromBytes(
-  bytes: Uint8Array,
+  bytes: Uint8Array<ArrayBuffer>,
   originalName: string,
   key: CryptoKey,
   userId: string,

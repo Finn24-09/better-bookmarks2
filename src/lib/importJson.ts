@@ -37,7 +37,7 @@ export interface ParsedJsonBookmark {
   /** Direct URL thumbnail — passed through as thumbnailUrl on the bookmark. */
   thumbnailUrl: string | null;
   /** Decoded JPEG bytes from an embedded data URI. Encrypt + upload on import. */
-  thumbnailData: Uint8Array | null;
+  thumbnailData: Uint8Array<ArrayBuffer> | null;
   thumbnailOriginalName: string | null;
 }
 
@@ -73,7 +73,7 @@ function parseHttpUrl(raw: string): string | null {
   }
 }
 
-function base64ToBytes(b64: string): Uint8Array {
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
@@ -105,7 +105,7 @@ function parseThumbnail(thumb: unknown): Pick<ParsedJsonBookmark, 'thumbnailUrl'
 
     if (!dataUri.startsWith(JPEG_DATA_URI_PREFIX)) return none;
 
-    let bytes: Uint8Array;
+    let bytes: Uint8Array<ArrayBuffer>;
     try {
       bytes = base64ToBytes(dataUri.slice(JPEG_DATA_URI_PREFIX.length));
     } catch {

@@ -30,7 +30,6 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
   const [isLoading, setIsLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
-  const [fetchedAll, setFetchedAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isFiltered = search.trim() !== '' || selectedTagId !== null;
@@ -86,7 +85,6 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
         setAllBookmarks(resolved);
         setOffset(fetchAll ? resolved.length : PAGE_SIZE);
         setHasMore(fetchAll ? false : resolved.length === PAGE_SIZE);
-        setFetchedAll(fetchAll);
       } catch (e) {
         if (import.meta.env.DEV) console.error('[useBookmarks] load failed:', e);
         if (id === fetchIdRef.current) {

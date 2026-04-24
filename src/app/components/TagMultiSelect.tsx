@@ -89,13 +89,13 @@ export function TagMultiSelect({
           sideOffset={6}
           avoidCollisions
           collisionPadding={16}
-          className="w-[var(--radix-popover-trigger-width)] p-0
+          className="w-(--radix-popover-trigger-width) p-0
                      bg-slate-900/95 backdrop-blur-xl border border-white/15
                      rounded-2xl shadow-2xl shadow-purple-500/20 overflow-hidden"
         >
           <Command
             shouldFilter={false}
-            className="bg-transparent [&_[data-slot=command-input-wrapper]]:border-white/10 [&_[data-slot=command-input-wrapper]_svg]:text-white"
+            className="bg-transparent **:data-[slot=command-input-wrapper]:border-white/10 [&_[data-slot=command-input-wrapper]_svg]:text-white"
           >
             <CommandInput
               placeholder="Search tags…"
@@ -104,7 +104,7 @@ export function TagMultiSelect({
               className="text-white/90 placeholder:text-white/40 text-sm"
             />
             <CommandList
-              className="max-h-[200px] overflow-y-auto overscroll-contain touch-pan-y p-1"
+              className="max-h-50 overflow-y-auto overscroll-contain touch-pan-y p-1"
               onWheel={(e) => { e.currentTarget.scrollTop += e.deltaY; }}
             >
               {filtered.length === 0 && !showCreate && (
@@ -130,7 +130,7 @@ export function TagMultiSelect({
                         className={cn(
                           "w-4 h-4 rounded-full border flex items-center justify-center shrink-0 transition-all duration-150",
                           isSelected
-                            ? "bg-gradient-to-br from-purple-600 to-purple-800 border-purple-500"
+                            ? "bg-linear-to-br from-purple-600 to-purple-800 border-purple-500"
                             : "border-white/20",
                         )}
                       >

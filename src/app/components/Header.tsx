@@ -12,8 +12,8 @@ import { useAuth } from "../contexts/AuthContext";
 interface HeaderProps {
   onChangePassword: () => void;
   onDeleteAccount: () => void;
-  onImportBookmarks: () => void;
-  onExportBookmarks: () => void;
+  onImportBookmarks?: () => void;
+  onExportBookmarks?: () => void;
 }
 
 export function Header({ onChangePassword, onDeleteAccount, onImportBookmarks, onExportBookmarks }: HeaderProps) {
@@ -43,7 +43,7 @@ export function Header({ onChangePassword, onDeleteAccount, onImportBookmarks, o
           <DropdownMenuContent
             align="end"
             sideOffset={8}
-            className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl shadow-purple-500/20 p-1.5 min-w-[220px]"
+            className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl shadow-purple-500/20 p-1.5 min-w-55"
           >
             {/* Email display */}
             <div className="flex items-center gap-3 px-3 py-2.5 text-sm text-white/50 cursor-default select-none">

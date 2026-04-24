@@ -156,7 +156,7 @@ export function DeleteAccountModal({ open, onClose }: DeleteAccountModalProps) {
                 className={cn(
                   "absolute inset-y-0 left-0 bg-red-500/25 rounded-full",
                   "transition-[width] ease-linear",
-                  holding ? "w-full duration-[3000ms]" : "w-0 duration-0",
+                  holding ? "w-full duration-3000" : "w-0 duration-0",
                 )}
               />
               {/* Label */}

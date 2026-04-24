@@ -67,7 +67,7 @@ function EyeToggle({ show, onToggle }: EyeToggleProps) {
 }
 
 const primaryBtn =
-  "w-full py-3 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full text-sm font-medium hover:scale-[1.02] hover:shadow-lg hover:shadow-purple-500/30 active:scale-[0.98] transition-all duration-300 shadow-md shadow-purple-500/20 disabled:opacity-60 disabled:pointer-events-none";
+  "w-full py-3 bg-linear-to-br from-purple-600 to-purple-800 text-white rounded-full text-sm font-medium hover:scale-[1.02] hover:shadow-lg hover:shadow-purple-500/30 active:scale-[0.98] transition-all duration-300 shadow-md shadow-purple-500/20 disabled:opacity-60 disabled:pointer-events-none";
 
 const ghostBtn =
   "px-6 py-2.5 border border-white/40 text-white rounded-full hover:bg-white/10 hover:border-white/60 active:scale-95 transition-all duration-300 text-sm";
@@ -244,16 +244,16 @@ export function AuthPage() {
   const handleSuccess = () => navigate("/");
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-linear-to-br from-slate-950 via-purple-950 to-slate-950 flex items-center justify-center p-6">
 
       {/* ------------------------------------------------------------------ */}
       {/* Desktop card (md+)                                                  */}
       {/* ------------------------------------------------------------------ */}
-      <div className="hidden md:block relative w-full max-w-[900px] min-h-[560px] bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-purple-500/10">
+      <div className="hidden md:block relative w-full max-w-225 min-h-140 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-purple-500/10">
 
         {/* Login form — left half */}
         <div className="absolute inset-y-0 left-0 w-1/2 flex items-center justify-center p-10 z-0">
-          <div className="w-full max-w-[280px] flex flex-col gap-5">
+          <div className="w-full max-w-70 flex flex-col gap-5">
             <div>
               <h2 className="text-2xl font-medium text-white mb-1">Sign In</h2>
               <p className="text-sm text-white/50">Welcome back</p>
@@ -264,7 +264,7 @@ export function AuthPage() {
 
         {/* Register form — right half */}
         <div className="absolute inset-y-0 right-0 w-1/2 flex items-center justify-center p-10 z-0">
-          <div className="w-full max-w-[280px] flex flex-col gap-5">
+          <div className="w-full max-w-70 flex flex-col gap-5">
             <div>
               <h2 className="text-2xl font-medium text-white mb-1">Create Account</h2>
               <p className="text-sm text-white/50">Start saving your bookmarks</p>
@@ -275,7 +275,7 @@ export function AuthPage() {
 
         {/* Sliding overlay — z-10 */}
         <motion.div
-          className="absolute inset-y-0 w-1/2 z-10 bg-gradient-to-br from-purple-600 to-purple-900 flex flex-col items-center justify-center p-10 shadow-2xl"
+          className="absolute inset-y-0 w-1/2 z-10 bg-linear-to-br from-purple-600 to-purple-900 flex flex-col items-center justify-center p-10 shadow-2xl"
           initial={{ left: "50%" }}
           animate={{ left: isLogin ? "50%" : "0%" }}
           transition={{ duration: 0.6, ease: [0.76, 0, 0.24, 1] }}
@@ -285,8 +285,8 @@ export function AuthPage() {
             className={cn(
               "absolute inset-y-0 w-8 pointer-events-none",
               isLogin
-                ? "left-0 bg-gradient-to-r from-purple-900/60 to-transparent"
-                : "right-0 bg-gradient-to-l from-purple-900/60 to-transparent",
+                ? "left-0 bg-linear-to-r from-purple-900/60 to-transparent"
+                : "right-0 bg-linear-to-l from-purple-900/60 to-transparent",
             )}
           />
 
@@ -312,7 +312,7 @@ export function AuthPage() {
                 className="flex flex-col items-center text-center gap-5"
               >
                 <h2 className="text-2xl font-medium text-white">New Here?</h2>
-                <p className="text-white/70 text-sm leading-relaxed max-w-[220px]">
+                <p className="text-white/70 text-sm leading-relaxed max-w-55">
                   Sign up and start saving your bookmarks
                 </p>
                 <button
@@ -333,7 +333,7 @@ export function AuthPage() {
                 className="flex flex-col items-center text-center gap-5"
               >
                 <h2 className="text-2xl font-medium text-white">Welcome Back!</h2>
-                <p className="text-white/70 text-sm leading-relaxed max-w-[220px]">
+                <p className="text-white/70 text-sm leading-relaxed max-w-55">
                   Sign in to access your saved bookmarks
                 </p>
                 <button
@@ -378,7 +378,7 @@ export function AuthPage() {
               className={cn(
                 "flex-1 py-2 rounded-full text-sm transition-all duration-300",
                 isLogin
-                  ? "bg-gradient-to-br from-purple-600 to-purple-800 text-white shadow-md shadow-purple-500/20"
+                  ? "bg-linear-to-br from-purple-600 to-purple-800 text-white shadow-md shadow-purple-500/20"
                   : "text-white/50 hover:text-white/80",
               )}
             >
@@ -390,7 +390,7 @@ export function AuthPage() {
               className={cn(
                 "flex-1 py-2 rounded-full text-sm transition-all duration-300",
                 !isLogin
-                  ? "bg-gradient-to-br from-purple-600 to-purple-800 text-white shadow-md shadow-purple-500/20"
+                  ? "bg-linear-to-br from-purple-600 to-purple-800 text-white shadow-md shadow-purple-500/20"
                   : "text-white/50 hover:text-white/80",
               )}
             >

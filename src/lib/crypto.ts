@@ -58,7 +58,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
 }
 
 /** Encrypt raw bytes. Returns base64(iv || ciphertext). */
-export async function encryptBinary(key: CryptoKey, data: Uint8Array): Promise<string> {
+export async function encryptBinary(key: CryptoKey, data: Uint8Array<ArrayBuffer>): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
   const combined = new Uint8Array(12 + ciphertext.byteLength);
@@ -68,7 +68,7 @@ export async function encryptBinary(key: CryptoKey, data: Uint8Array): Promise<s
 }
 
 /** Decrypt base64(iv || ciphertext) back to raw bytes. */
-export async function decryptBinary(key: CryptoKey, encoded: string): Promise<Uint8Array> {
+export async function decryptBinary(key: CryptoKey, encoded: string): Promise<Uint8Array<ArrayBuffer>> {
   const combined = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
   const plaintext = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: combined.slice(0, 12) },
