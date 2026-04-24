@@ -201,7 +201,13 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
         }
         {...register("password", {
           required: "Password is required",
-          minLength: { value: 8, message: "At least 8 characters" },
+          minLength: { value: 12, message: "At least 12 characters" },
+          validate: (v) => {
+            if (!/[A-Z]/.test(v)) return "Must include an uppercase letter";
+            if (!/[a-z]/.test(v)) return "Must include a lowercase letter";
+            if (!/[^a-zA-Z]/.test(v)) return "Must include a number or symbol";
+            return true;
+          },
         })}
       />
       <InputField

@@ -20,6 +20,7 @@ vi.mock('../contexts/AuthContext', () => ({
 
 vi.mock('../../lib/auth', () => ({
   changePassword: vi.fn(),
+  signIn: vi.fn(),
 }));
 
 vi.mock('../../lib/crypto', () => ({
@@ -45,7 +46,7 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-import { changePassword } from '../../lib/auth';
+import { changePassword, signIn } from '../../lib/auth';
 import { deriveKey } from '../../lib/crypto';
 import { getBookmarks, reencryptBookmark } from '../../lib/bookmarks';
 import { getTags, reencryptTag } from '../../lib/tags';
@@ -69,7 +70,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
 describe('ChangePasswordModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: user has no bookmarks or tags
+    // Default: pre-flight signIn succeeds, user has no bookmarks or tags
+    vi.mocked(signIn).mockResolvedValue({ token: 't', user_id: 'u' } as never);
     vi.mocked(getBookmarks).mockResolvedValue([]);
     vi.mocked(getTags).mockResolvedValue([]);
     vi.mocked(reencryptBookmark).mockResolvedValue(undefined);
@@ -108,7 +110,7 @@ describe('ChangePasswordModal', () => {
     });
   });
 
-  it('shows "At least 8 characters" error for a short new password', async () => {
+  it('shows "At least 12 characters" error for a short new password', async () => {
     const user = userEvent.setup();
     renderModal();
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'old');
@@ -116,7 +118,7 @@ describe('ChangePasswordModal', () => {
     await user.type(screen.getByPlaceholderText('Retype new password…'), 'short');
     await user.click(screen.getByRole('button', { name: /save password/i }));
     await waitFor(() =>
-      expect(screen.getByText('At least 8 characters')).toBeInTheDocument(),
+      expect(screen.getByText('At least 12 characters')).toBeInTheDocument(),
     );
   });
 
@@ -124,8 +126,8 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     renderModal();
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'oldpass123');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'newpass123');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'different1');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12?');
     await user.click(screen.getByRole('button', { name: /save password/i }));
     await waitFor(() =>
       expect(screen.getByText('Passwords do not match')).toBeInTheDocument(),
@@ -143,14 +145,14 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     render(<ChangePasswordModal open={true} onClose={onClose} />);
 
-    await user.type(screen.getByPlaceholderText('Enter current password…'), 'oldpass123');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'newpass456');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'newpass456');
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
-      expect(changePassword).toHaveBeenCalledWith('oldpass123', 'newpass456');
-      expect(deriveKey).toHaveBeenCalledWith('newpass456', 'user@example.com');
+      expect(changePassword).toHaveBeenCalledWith('OldPass123!', 'StrongPass12!');
+      expect(deriveKey).toHaveBeenCalledWith('StrongPass12!', 'user@example.com');
       expect(mockUpdateKey).toHaveBeenCalledWith(mockKey);
       expect(onClose).toHaveBeenCalled();
     });
@@ -166,9 +168,9 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByPlaceholderText('Enter current password…'), 'old123456');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'new123456');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'new123456');
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
@@ -186,9 +188,9 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByPlaceholderText('Enter current password…'), 'old123456');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'new123456');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'new123456');
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
@@ -205,9 +207,9 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByPlaceholderText('Enter current password…'), 'old123456');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'new123456');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'new123456');
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
@@ -224,13 +226,13 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByPlaceholderText('Enter current password…'), 'old123456');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'new123456');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'new123456');
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
-      expect(reencryptThumbnail).toHaveBeenCalledWith('img-1', 'photo.jpg', mockCryptoKey, newKey);
+      expect(reencryptThumbnail).toHaveBeenCalledWith('img-1', mockCryptoKey, newKey);
     });
   });
 
@@ -245,9 +247,9 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByPlaceholderText('Enter current password…'), 'old123456');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'new123456');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'new123456');
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass99!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass99!');
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
@@ -266,9 +268,9 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByPlaceholderText('Enter current password…'), 'old123456');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'new123456');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'new123456');
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() =>
@@ -283,9 +285,9 @@ describe('ChangePasswordModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByPlaceholderText('Enter current password…'), 'wrong');
-    await user.type(screen.getByPlaceholderText('Enter new password…'), 'newpass456');
-    await user.type(screen.getByPlaceholderText('Retype new password…'), 'newpass456');
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass99!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass99!');
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() =>

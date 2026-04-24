@@ -156,7 +156,7 @@ describe('AuthPage', () => {
   // Register form – validation
   // -------------------------------------------------------------------------
 
-  it('register form shows "At least 8 characters" for a short password', async () => {
+  it('register form shows "At least 12 characters" for a short password', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -172,7 +172,7 @@ describe('AuthPage', () => {
     await user.click(screen.getAllByRole('button', { name: /create account/i })[0]);
 
     await waitFor(() =>
-      expect(screen.getAllByText('At least 8 characters').length).toBeGreaterThan(0),
+      expect(screen.getAllByText('At least 12 characters').length).toBeGreaterThan(0),
     );
   });
 
@@ -202,13 +202,13 @@ describe('AuthPage', () => {
     renderPage();
 
     await user.type(screen.getAllByPlaceholderText('Email address')[1], 'new@example.com');
-    await user.type(screen.getAllByPlaceholderText('Password')[1], 'password123');
-    await user.type(screen.getAllByPlaceholderText('Confirm password')[0], 'password123');
+    await user.type(screen.getAllByPlaceholderText('Password')[1], 'StrongPass12!');
+    await user.type(screen.getAllByPlaceholderText('Confirm password')[0], 'StrongPass12!');
     await user.click(screen.getAllByRole('button', { name: /create account/i })[0]);
 
     await waitFor(() => {
-      expect(signUp).toHaveBeenCalledWith('new@example.com', 'password123');
-      expect(deriveKey).toHaveBeenCalledWith('password123', 'new@example.com');
+      expect(signUp).toHaveBeenCalledWith('new@example.com', 'StrongPass12!');
+      expect(deriveKey).toHaveBeenCalledWith('StrongPass12!', 'new@example.com');
       expect(mockLogin).toHaveBeenCalled();
       expect(mockNavigate).toHaveBeenCalledWith('/');
     });
@@ -224,8 +224,8 @@ describe('AuthPage', () => {
     renderPage();
 
     await user.type(screen.getAllByPlaceholderText('Email address')[1], 'dup@example.com');
-    await user.type(screen.getAllByPlaceholderText('Password')[1], 'password123');
-    await user.type(screen.getAllByPlaceholderText('Confirm password')[0], 'password123');
+    await user.type(screen.getAllByPlaceholderText('Password')[1], 'StrongPass12!');
+    await user.type(screen.getAllByPlaceholderText('Confirm password')[0], 'StrongPass12!');
     await user.click(screen.getAllByRole('button', { name: /create account/i })[0]);
 
     await waitFor(() =>

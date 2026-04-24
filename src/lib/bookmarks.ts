@@ -133,9 +133,6 @@ export async function reencryptBookmark(bm: Bookmark, newKey: CryptoKey): Promis
     title_enc: await encrypt(newKey, bm.title),
     url_enc: await encrypt(newKey, bm.url),
     thumbnail_url_enc: bm.thumbnailUrl ? await encrypt(newKey, bm.thumbnailUrl) : null,
-    thumbnail_original_name_enc: bm.thumbnailOriginalName
-      ? await encrypt(newKey, bm.thumbnailOriginalName)
-      : null,
     updated_at: new Date().toISOString(),
   };
   await apiFetch(`/bookmarks?id=eq.${bm.id}`, {

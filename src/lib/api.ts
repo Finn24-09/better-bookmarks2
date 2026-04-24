@@ -34,9 +34,18 @@ export async function apiFetch<T = unknown>(
   const response = await fetch(`/api${path}`, { ...options, headers });
 
   if (!response.ok) {
-    // For 400/409 relay the PostgREST message — these are intentional
-    // user-facing errors from sign_in/sign_up SQL functions. For all other
-    // status codes use generic messages to avoid leaking DB schema details.
+    // Relay raw PostgREST error messages only for auth RPCs where the messages
+    // are intentional user-facing feedback from SQL functions (e.g. "invalid
+    // credentials", "email already in use"). For all other paths, use generic
+    // messages to avoid leaking DB schema details (column names, constraint names).
+    const AUTH_RPC_PATHS = [
+      '/rpc/sign_in',
+      '/rpc/sign_up',
+      '/rpc/change_password',
+      '/rpc/delete_account',
+    ];
+    const isAuthRpc = AUTH_RPC_PATHS.some((p) => path.startsWith(p));
+
     const STATUS_MESSAGES: Record<number, string> = {
       401: 'Authentication required. Please sign in.',
       403: 'You do not have permission to perform this action.',
@@ -47,7 +56,7 @@ export async function apiFetch<T = unknown>(
     };
 
     let message = STATUS_MESSAGES[response.status] ?? `Request failed (${response.status})`;
-    if (response.status === 400 || response.status === 401 || response.status === 409) {
+    if (isAuthRpc && (response.status === 400 || response.status === 401 || response.status === 409)) {
       try {
         const body = await response.json();
         message = body.message ?? body.hint ?? message;

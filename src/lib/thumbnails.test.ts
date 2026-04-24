@@ -20,6 +20,8 @@ import {
   uploadThumbnail,
   fetchThumbnailObjectUrl,
   deleteThumbnailImage,
+  reencryptThumbnail,
+  reencryptThumbnailToBody,
 } from './thumbnails';
 
 // ---------------------------------------------------------------------------
@@ -241,5 +243,105 @@ describe('deleteThumbnailImage', () => {
       '/thumbnail_images?id=eq.img-abc-123',
       { method: 'DELETE' },
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reencryptThumbnail
+// ---------------------------------------------------------------------------
+
+describe('reencryptThumbnail', () => {
+  it('decrypts original_name_enc from the server and re-encrypts with the new key', async () => {
+    const { deriveKey: dk, encryptBinary: eb, encrypt: enc } = await import('./crypto');
+    const oldKey = await dk('old-pass', 'user@example.com');
+    const newKey = await dk('new-pass', 'user@example.com');
+
+    const fakeBytes = new Uint8Array([0xff, 0xd8, 0x01]);
+    const [oldDataEnc, oldNameEnc] = await Promise.all([
+      eb(oldKey, fakeBytes),
+      enc(oldKey, 'original-photo.jpg'),
+    ]);
+
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce([{ data_enc: oldDataEnc, original_name_enc: oldNameEnc }])
+      .mockResolvedValueOnce(undefined);
+
+    await reencryptThumbnail('img-1', oldKey, newKey);
+
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    const patchCall = vi.mocked(apiFetch).mock.calls[1];
+    expect(patchCall[0]).toContain('/thumbnail_images?id=eq.img-1');
+    expect((patchCall[1] as RequestInit).method).toBe('PATCH');
+
+    const patchBody = JSON.parse((patchCall[1] as RequestInit).body as string);
+    expect(typeof patchBody.data_enc).toBe('string');
+    expect(typeof patchBody.original_name_enc).toBe('string');
+    // ciphertexts must differ from the old ones (different key)
+    expect(patchBody.data_enc).not.toBe(oldDataEnc);
+    expect(patchBody.original_name_enc).not.toBe(oldNameEnc);
+  });
+
+  it('does nothing when the thumbnail row is not found', async () => {
+    const { deriveKey: dk } = await import('./crypto');
+    const oldKey = await dk('old-pass', 'user@example.com');
+    const newKey = await dk('new-pass', 'user@example.com');
+
+    vi.mocked(apiFetch).mockResolvedValueOnce([]);
+
+    await reencryptThumbnail('img-missing', oldKey, newKey);
+
+    // Only the GET was made; no PATCH
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reencryptThumbnailToBody
+// ---------------------------------------------------------------------------
+
+describe('reencryptThumbnailToBody', () => {
+  it('returns encrypted body without calling PATCH', async () => {
+    const { deriveKey: dk, encryptBinary: eb, encrypt: enc, decrypt: dec, decryptBinary: deb } =
+      await import('./crypto');
+    const oldKey = await dk('old-pass', 'user@example.com');
+    const newKey = await dk('new-pass', 'user@example.com');
+
+    const fakeBytes = new Uint8Array([0xaa, 0xbb, 0xcc]);
+    const [oldDataEnc, oldNameEnc] = await Promise.all([
+      eb(oldKey, fakeBytes),
+      enc(oldKey, 'photo.jpg'),
+    ]);
+
+    vi.mocked(apiFetch).mockResolvedValueOnce([{ data_enc: oldDataEnc, original_name_enc: oldNameEnc }]);
+
+    const result = await reencryptThumbnailToBody('img-2', oldKey, newKey);
+
+    // Only the GET was made — no PATCH
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(result.imageId).toBe('img-2');
+    expect(typeof result.data_enc).toBe('string');
+    expect(typeof result.original_name_enc).toBe('string');
+
+    // The new ciphertext must decrypt correctly with newKey
+    const [decBytes, decName] = await Promise.all([
+      deb(newKey, result.data_enc),
+      dec(newKey, result.original_name_enc),
+    ]);
+    expect(Array.from(decBytes)).toEqual(Array.from(fakeBytes));
+    expect(decName).toBe('photo.jpg');
+  });
+
+  it('returns empty strings when the thumbnail row is not found', async () => {
+    const { deriveKey: dk } = await import('./crypto');
+    const oldKey = await dk('old-pass', 'user@example.com');
+    const newKey = await dk('new-pass', 'user@example.com');
+
+    vi.mocked(apiFetch).mockResolvedValueOnce([]);
+
+    const result = await reencryptThumbnailToBody('img-gone', oldKey, newKey);
+
+    expect(result.imageId).toBe('img-gone');
+    expect(result.data_enc).toBe('');
+    expect(result.original_name_enc).toBe('');
   });
 });

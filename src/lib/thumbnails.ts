@@ -1,5 +1,5 @@
 import { apiFetch } from './api';
-import { encrypt, encryptBinary, decryptBinary } from './crypto';
+import { encrypt, encryptBinary, decryptBinary, decrypt } from './crypto';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -171,13 +171,14 @@ export async function fetchThumbnailObjectUrl(
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch, decrypt, and re-encrypt a thumbnail image's binary data and original
- * name with a new key. Called during password change to keep all stored data
- * decryptable with the new key.
+ * Fetch, decrypt with oldKey, re-encrypt with newKey, and write both the
+ * binary data and original filename back to thumbnail_images.
+ *
+ * The original filename is sourced from the server (original_name_enc) rather
+ * than a caller-supplied string, preventing silent overwrites with empty values.
  */
 export async function reencryptThumbnail(
   imageId: string,
-  originalName: string,
   oldKey: CryptoKey,
   newKey: CryptoKey,
 ): Promise<void> {
@@ -186,7 +187,11 @@ export async function reencryptThumbnail(
   );
   if (!rows?.length) return;
 
-  const imageBytes = await decryptBinary(oldKey, rows[0].data_enc);
+  const [imageBytes, originalName] = await Promise.all([
+    decryptBinary(oldKey, rows[0].data_enc),
+    decrypt(oldKey, rows[0].original_name_enc),
+  ]);
+
   const [newDataEnc, newOriginalNameEnc] = await Promise.all([
     encryptBinary(newKey, imageBytes),
     encrypt(newKey, originalName),
@@ -196,6 +201,35 @@ export async function reencryptThumbnail(
     method: 'PATCH',
     body: JSON.stringify({ data_enc: newDataEnc, original_name_enc: newOriginalNameEnc }),
   });
+}
+
+/**
+ * Fetch, decrypt, and re-encrypt a thumbnail's binary data and original name
+ * in memory — returns the encrypted body without writing to the DB.
+ * Use this for the two-phase key rotation in ChangePasswordModal so all crypto
+ * completes before any DB writes begin.
+ */
+export async function reencryptThumbnailToBody(
+  imageId: string,
+  oldKey: CryptoKey,
+  newKey: CryptoKey,
+): Promise<{ imageId: string; data_enc: string; original_name_enc: string }> {
+  const rows = await apiFetch<{ data_enc: string; original_name_enc: string }[]>(
+    `/thumbnail_images?id=eq.${imageId}&select=data_enc,original_name_enc`,
+  );
+  if (!rows?.length) return { imageId, data_enc: '', original_name_enc: '' };
+
+  const [imageBytes, originalName] = await Promise.all([
+    decryptBinary(oldKey, rows[0].data_enc),
+    decrypt(oldKey, rows[0].original_name_enc),
+  ]);
+
+  const [newDataEnc, newOriginalNameEnc] = await Promise.all([
+    encryptBinary(newKey, imageBytes),
+    encrypt(newKey, originalName),
+  ]);
+
+  return { imageId, data_enc: newDataEnc, original_name_enc: newOriginalNameEnc };
 }
 
 // ---------------------------------------------------------------------------

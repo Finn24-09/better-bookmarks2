@@ -1,11 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createBookmark, updateBookmark, deleteBookmark } from './bookmarks';
+import { createBookmark, updateBookmark, deleteBookmark, reencryptBookmark } from './bookmarks';
+import type { Bookmark } from './bookmarks';
 import { deriveKey, decrypt } from './crypto';
 import { setAuthToken } from './api';
 
 const USER_ID = 'user-uuid-123';
 const TITLE = 'My Bookmark';
 const URL = 'https://example.com';
+
+function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
+  return {
+    id: 'bm-reenc-1',
+    title: 'Re-encrypt Me',
+    url: 'https://example.com/reenc',
+    thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
+    thumbnailFileId: 'img-uuid-reenc',
+    thumbnailOriginalName: 'photo.jpg',
+    tagIds: [],
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
 
 // Minimal bookmark row for POST response
 function bookmarkRow(id = 'bm-1') {
@@ -217,6 +233,46 @@ describe('bookmarks', () => {
 
     expect(bookmarks[0].thumbnailFileId).toBe('img-1');
     expect(bookmarks[0].thumbnailOriginalName).toBe('photo.jpg');
+  });
+
+  // -------------------------------------------------------------------------
+  // reencryptBookmark — PATCH body field contract
+  // -------------------------------------------------------------------------
+  it('reencryptBookmark does NOT include thumbnail_original_name_enc in the PATCH body', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    await reencryptBookmark(makeBookmark(), key);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).not.toHaveProperty('thumbnail_original_name_enc');
+  });
+
+  it('reencryptBookmark includes title_enc, url_enc, and thumbnail_url_enc in the PATCH body', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    await reencryptBookmark(makeBookmark(), key);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toHaveProperty('title_enc');
+    expect(body).toHaveProperty('url_enc');
+    expect(body).toHaveProperty('thumbnail_url_enc');
+  });
+
+  it('reencryptBookmark sends PATCH to the correct bookmark URL', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    await reencryptBookmark(makeBookmark({ id: 'bm-42' }), key);
+    expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
+    expect(fetchMock.mock.calls[0][0] as string).toContain('/bookmarks?id=eq.bm-42');
+  });
+
+  it('reencryptBookmark re-encrypts title so ciphertext differs from plaintext', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    await reencryptBookmark(makeBookmark({ title: 'Secret Title' }), key);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.title_enc).not.toBe('Secret Title');
+  });
+
+  it('reencryptBookmark sets thumbnail_url_enc to null when thumbnailUrl is null', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    await reencryptBookmark(makeBookmark({ thumbnailUrl: null }), key);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.thumbnail_url_enc).toBeNull();
   });
 
   it('getBookmarks sets thumbnailFileId and thumbnailOriginalName to null when absent', async () => {

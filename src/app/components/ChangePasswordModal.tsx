@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { X } from "lucide-react";
 import { toast } from "sonner";
@@ -10,7 +10,7 @@ import {
 } from "./ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
-import { changePassword } from "../../lib/auth";
+import { changePassword, signIn } from "../../lib/auth";
 import { deriveKey } from "../../lib/crypto";
 import { getBookmarks, reencryptBookmark } from "../../lib/bookmarks";
 import { getTags, reencryptTag } from "../../lib/tags";
@@ -28,9 +28,18 @@ interface FormFields {
   confirmPassword: string;
 }
 
+function validatePasswordComplexity(v: string): true | string {
+  if (!/[A-Z]/.test(v)) return "Must include an uppercase letter";
+  if (!/[a-z]/.test(v)) return "Must include a lowercase letter";
+  if (!/[^a-zA-Z]/.test(v)) return "Must include a number or symbol";
+  return true;
+}
+
 export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps) {
   const { email, cryptoKey, updateKey } = useAuth();
   const [apiError, setApiError] = useState("");
+  // Explicit latch prevents concurrent submissions if isSubmitting resets mid-flight.
+  const isRotatingRef = useRef(false);
 
   const {
     register,
@@ -47,9 +56,17 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
   };
 
   const onSubmit = async (data: FormFields) => {
+    if (isRotatingRef.current) return;
+    isRotatingRef.current = true;
     setApiError("");
+
     try {
       if (!cryptoKey || !email) throw new Error("Not authenticated");
+
+      // Pre-flight: validate current password before any data mutation.
+      // Most key-rotation failures originate here — catching wrong-password errors
+      // while the DB is still untouched prevents any partial re-encryption.
+      await signIn(email, data.currentPassword);
 
       const newKey = await deriveKey(data.newPassword, email);
 
@@ -59,16 +76,14 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
         getTags(cryptoKey),
       ]);
 
-      // Re-encrypt bookmark fields (title, url, thumbnail URL and filename).
+      // Re-encrypt bookmark fields (title, url, thumbnail URL).
       await Promise.all(allBookmarks.map((bm) => reencryptBookmark(bm, newKey)));
 
       // Re-encrypt thumbnail binary files stored in thumbnail_images.
       await Promise.all(
         allBookmarks
           .filter((bm) => bm.thumbnailFileId)
-          .map((bm) =>
-            reencryptThumbnail(bm.thumbnailFileId!, bm.thumbnailOriginalName ?? '', cryptoKey, newKey),
-          ),
+          .map((bm) => reencryptThumbnail(bm.thumbnailFileId!, cryptoKey, newKey)),
       );
 
       // Re-encrypt tag names (name_hmac is keyed on userId, not password — unchanged).
@@ -84,6 +99,8 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
       handleClose();
     } catch (err) {
       setApiError(err instanceof Error ? err.message : "Failed to change password");
+    } finally {
+      isRotatingRef.current = false;
     }
   };
 
@@ -144,7 +161,8 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
                   className={errors.newPassword ? errorInputCls : inputCls}
                   {...register("newPassword", {
                     required: "Required",
-                    minLength: { value: 8, message: "At least 8 characters" },
+                    minLength: { value: 12, message: "At least 12 characters" },
+                    validate: validatePasswordComplexity,
                   })}
                 />
                 {errors.newPassword && (
@@ -186,7 +204,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-6 py-2.5 bg-gradient-to-br from-purple-600 to-purple-800 text-white rounded-full hover:scale-105 active:scale-95 transition-all duration-300 text-sm shadow-lg shadow-purple-500/30 disabled:opacity-60 disabled:pointer-events-none"
+                className="px-6 py-2.5 bg-linear-to-br from-purple-600 to-purple-800 text-white rounded-full hover:scale-105 active:scale-95 transition-all duration-300 text-sm shadow-lg shadow-purple-500/30 disabled:opacity-60 disabled:pointer-events-none"
               >
                 {isSubmitting ? "Saving…" : "Save Password"}
               </button>
