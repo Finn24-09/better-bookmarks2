@@ -20,13 +20,20 @@ export default function App() {
   // Lifted search/filter state (Phase 4)
   // --------------------------------------------------------------------------
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
+
+  // Debounce search by 300ms to avoid a full reload on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   // --------------------------------------------------------------------------
   // Data
   // --------------------------------------------------------------------------
   const { bookmarks, tags, isLoading, hasMore, isFiltered, error, loadMore, refresh } =
-    useBookmarks({ search, selectedTagId });
+    useBookmarks({ search: debouncedSearch, selectedTagId });
 
   useEffect(() => {
     if (error) toast.error(error);

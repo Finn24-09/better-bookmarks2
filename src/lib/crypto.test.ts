@@ -94,4 +94,17 @@ describe('crypto', () => {
     const decoded = await decryptBinary(key, encoded);
     expect(decoded).toEqual(large);
   });
+
+  // -------------------------------------------------------------------------
+  // encrypt — large string (F-4)
+  // -------------------------------------------------------------------------
+  it('encrypt handles a very long string without stack overflow', async () => {
+    const key = await deriveKey('password123', 'test@example.com');
+    // 70 000 chars → ciphertext > 65 535 bytes, which would blow the call stack
+    // with the old btoa(String.fromCharCode(...spread)) approach.
+    const long = 'x'.repeat(70_000);
+    const encoded = await encrypt(key, long);
+    const decoded = await decrypt(key, encoded);
+    expect(decoded).toBe(long);
+  });
 });

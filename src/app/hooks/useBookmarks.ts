@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getBookmarks, Bookmark } from '../../lib/bookmarks';
 import { getTags, Tag } from '../../lib/tags';
 import { fetchThumbnailObjectUrl } from '../../lib/thumbnails';
+import { runWithConcurrency } from '../../lib/utils';
 
 const PAGE_SIZE = 20;
 
@@ -35,7 +36,10 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
   const isFiltered = search.trim() !== '' || selectedTagId !== null;
 
   const fetchIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   const thumbCache = useRef<Map<string, string>>(new Map());
+  // Maps bookmarkId → thumbnailFileId to detect replaced thumbnails and revoke stale blob URLs.
+  const bookmarkFileIdRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     const cache = thumbCache.current;
@@ -44,16 +48,30 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
 
   const resolveThumbnails = useCallback(
     async (bms: Bookmark[], key: CryptoKey): Promise<Bookmark[]> => {
-      return Promise.all(
-        bms.map(async (bm) => {
-          if (!bm.thumbnailFileId) return bm;
+      const results = [...bms];
+      await runWithConcurrency(
+        bms.map((bm, i) => ({ bm, i })),
+        async ({ bm, i }) => {
+          if (!bm.thumbnailFileId) return;
+
+          // Revoke stale blob URL if the bookmark's thumbnail was replaced.
+          const prevFileId = bookmarkFileIdRef.current.get(bm.id);
+          if (prevFileId && prevFileId !== bm.thumbnailFileId) {
+            const staleUrl = thumbCache.current.get(prevFileId);
+            if (staleUrl) URL.revokeObjectURL(staleUrl);
+            thumbCache.current.delete(prevFileId);
+          }
+          bookmarkFileIdRef.current.set(bm.id, bm.thumbnailFileId);
+
           if (!thumbCache.current.has(bm.thumbnailFileId)) {
             const url = await fetchThumbnailObjectUrl(bm.thumbnailFileId, key);
             thumbCache.current.set(bm.thumbnailFileId, url);
           }
-          return { ...bm, thumbnailUrl: thumbCache.current.get(bm.thumbnailFileId)! };
-        }),
+          results[i] = { ...bm, thumbnailUrl: thumbCache.current.get(bm.thumbnailFileId)! };
+        },
+        3,
       );
+      return results;
     },
     [],
   );
@@ -69,22 +87,27 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
 
   const load = useCallback(
     async (key: CryptoKey, fetchAll: boolean) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       const id = ++fetchIdRef.current;
       setIsLoading(true);
       try {
-        const [bms] = await Promise.all([
+        const [page] = await Promise.all([
           fetchAll
-            ? getBookmarks(key)
-            : getBookmarks(key, { limit: PAGE_SIZE, offset: 0 }),
+            ? getBookmarks(key, { signal: controller.signal })
+            : getBookmarks(key, { limit: PAGE_SIZE + 1, offset: 0, signal: controller.signal }),
           loadTags(key),
         ]);
         if (id !== fetchIdRef.current) return; // stale
+        const bms = fetchAll ? page : page.slice(0, PAGE_SIZE);
+        const hasMoreFromPage = fetchAll ? false : page.length > PAGE_SIZE;
         setError(null);
         const resolved = await resolveThumbnails(bms, key);
         if (id !== fetchIdRef.current) return; // stale after thumbnail fetch
         setAllBookmarks(resolved);
         setOffset(fetchAll ? resolved.length : PAGE_SIZE);
-        setHasMore(fetchAll ? false : resolved.length === PAGE_SIZE);
+        setHasMore(hasMoreFromPage);
       } catch (e) {
         if (import.meta.env.DEV) console.error('[useBookmarks] load failed:', e);
         if (id === fetchIdRef.current) {
@@ -113,11 +136,12 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
     if (!cryptoKey || isLoading || !hasMore || isFiltered) return;
     setIsLoading(true);
     try {
-      const more = await getBookmarks(cryptoKey, { limit: PAGE_SIZE, offset });
+      const page = await getBookmarks(cryptoKey, { limit: PAGE_SIZE + 1, offset });
+      const more = page.slice(0, PAGE_SIZE);
       const resolved = await resolveThumbnails(more, cryptoKey);
       setAllBookmarks((prev) => [...prev, ...resolved]);
       setOffset((o) => o + resolved.length);
-      setHasMore(resolved.length === PAGE_SIZE);
+      setHasMore(page.length > PAGE_SIZE);
     } catch {
       // leave state as-is
     } finally {

@@ -138,7 +138,9 @@ export function BookmarkFormModal({
   };
 
   const handleRemoveThumbnail = async () => {
-    if (pendingFileId) {
+    // Only clean up a file uploaded in this editing session.
+    // Pre-existing saved files are cleaned up by onSubmit after save is confirmed.
+    if (pendingFileId && pendingFileId === unsavedFileIdRef.current) {
       await deleteThumbnailImage(pendingFileId).catch(() => {});
     }
     unsavedFileIdRef.current = null;
@@ -267,7 +269,19 @@ export function BookmarkFormModal({
                   type="url"
                   placeholder="https://…"
                   className={errors.url ? errorInputCls : inputCls}
-                  {...register("url", { required: "URL is required" })}
+                  {...register("url", {
+                    required: "URL is required",
+                    validate: (v) => {
+                      try {
+                        const u = new URL(v);
+                        return u.protocol === 'http:' || u.protocol === 'https:'
+                          ? true
+                          : 'Only http:// or https:// URLs are allowed';
+                      } catch {
+                        return 'Enter a valid URL';
+                      }
+                    },
+                  })}
                 />
                 {errors.url && (
                   <p className="text-xs text-red-400">{errors.url.message}</p>

@@ -32,7 +32,7 @@ export async function encrypt(key: CryptoKey, text: string): Promise<string> {
   const combined = new Uint8Array(12 + ciphertext.byteLength);
   combined.set(iv, 0);
   combined.set(new Uint8Array(ciphertext), 12);
-  return btoa(String.fromCharCode(...combined));
+  return bytesToBase64(combined);
 }
 
 /** Decrypt a base64(iv || ciphertext) string. */

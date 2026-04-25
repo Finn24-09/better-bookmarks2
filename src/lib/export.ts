@@ -2,6 +2,7 @@ import { apiFetch, apiFetchCount } from './api';
 import { decryptBinary, bytesToBase64 } from './crypto';
 import { getBookmarks, type Bookmark } from './bookmarks';
 import { getTags } from './tags';
+import { runWithConcurrency } from './utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,31 +82,6 @@ async function fetchThumbnailAsDataUri(
   }
 
   return `data:image/jpeg;base64,${bytesToBase64(bytes)}`;
-}
-
-/**
- * Run `worker` for each item in `items`, with at most `concurrency`
- * in-flight at once. Uses a shared index so workers self-balance.
- */
-async function runWithConcurrency<T>(
-  items: T[],
-  worker: (item: T) => Promise<void>,
-  concurrency: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  let index = 0;
-
-  async function drain(): Promise<void> {
-    while (index < items.length) {
-      if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
-      const i = index++;
-      await worker(items[i]);
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, drain),
-  );
 }
 
 // ---------------------------------------------------------------------------

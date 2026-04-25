@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createTag, setBookmarkTags } from './tags';
+import { getTags, createTag, setBookmarkTags } from './tags';
 import { deriveKey, decrypt, computeHmac } from './crypto';
 import { setAuthToken } from './api';
 
@@ -129,5 +129,15 @@ describe('tags', () => {
     await setBookmarkTags('bm-1', ['tag-a', 'tag-b'], ['tag-a', 'tag-b']);
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // getTags — null guard (F-3)
+  // -------------------------------------------------------------------------
+  it('getTags returns empty array when apiFetch returns undefined (e.g. 204 response)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204 });
+
+    const result = await getTags(key);
+    expect(result).toEqual([]);
   });
 });

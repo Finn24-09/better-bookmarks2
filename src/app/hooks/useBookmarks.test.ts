@@ -61,8 +61,8 @@ describe('useBookmarks', () => {
   // -------------------------------------------------------------------------
   // Paginated base mode (no search/filter)
   // -------------------------------------------------------------------------
-  it('initial fetch uses limit=20 and offset=0', async () => {
-    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(20));
+  it('initial fetch uses limit=21 (PAGE_SIZE+1) to detect whether more pages exist', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(21));
 
     const { result } = renderHook(() =>
       useBookmarks({ search: '', selectedTagId: null }),
@@ -70,11 +70,14 @@ describe('useBookmarks', () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(getBookmarks).toHaveBeenCalledWith(mockCryptoKey, { limit: 20, offset: 0 });
+    expect(getBookmarks).toHaveBeenCalledWith(
+      mockCryptoKey,
+      expect.objectContaining({ limit: 21, offset: 0 }),
+    );
   });
 
-  it('hasMore is true when the page is exactly full (20 items)', async () => {
-    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(20));
+  it('hasMore is true when PAGE_SIZE+1 items are returned (extra item confirms more exist)', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(21));
 
     const { result } = renderHook(() =>
       useBookmarks({ search: '', selectedTagId: null }),
@@ -82,6 +85,19 @@ describe('useBookmarks', () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.hasMore).toBe(true);
+    // Only PAGE_SIZE items should be displayed, not the extra probe item
+    expect(result.current.bookmarks).toHaveLength(20);
+  });
+
+  it('hasMore is false when exactly PAGE_SIZE items are returned (no extra item)', async () => {
+    vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(20));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasMore).toBe(false);
   });
 
   it('hasMore is false when the page is not full (< 20 items)', async () => {
@@ -97,8 +113,8 @@ describe('useBookmarks', () => {
 
   it('loadMore fetches next page with offset=20 and appends results', async () => {
     vi.mocked(getBookmarks)
-      .mockResolvedValueOnce(makeBookmarks(20))       // initial page
-      .mockResolvedValueOnce(makeBookmarks(5, 20));   // second page
+      .mockResolvedValueOnce(makeBookmarks(21))       // initial: 21 items → hasMore=true, display 20
+      .mockResolvedValueOnce(makeBookmarks(5, 20));   // second page: 5 items → hasMore=false
 
     const { result } = renderHook(() =>
       useBookmarks({ search: '', selectedTagId: null }),
@@ -111,13 +127,16 @@ describe('useBookmarks', () => {
     });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(getBookmarks).toHaveBeenCalledWith(mockCryptoKey, { limit: 20, offset: 20 });
+    expect(getBookmarks).toHaveBeenCalledWith(
+      mockCryptoKey,
+      expect.objectContaining({ limit: 21, offset: 20 }),
+    );
     expect(result.current.bookmarks).toHaveLength(25);
   });
 
   it('hasMore is false after loadMore returns a partial page', async () => {
     vi.mocked(getBookmarks)
-      .mockResolvedValueOnce(makeBookmarks(20))
+      .mockResolvedValueOnce(makeBookmarks(21))
       .mockResolvedValueOnce(makeBookmarks(3, 20));
 
     const { result } = renderHook(() =>
@@ -135,7 +154,7 @@ describe('useBookmarks', () => {
   // -------------------------------------------------------------------------
   // Filtered mode (search or tag)
   // -------------------------------------------------------------------------
-  it('when search is active, fetches all bookmarks without pagination options', async () => {
+  it('when search is active, fetches all bookmarks without limit/offset (pagination disabled)', async () => {
     vi.mocked(getBookmarks).mockResolvedValue(makeBookmarks(3));
 
     const { result } = renderHook(() =>
@@ -144,8 +163,10 @@ describe('useBookmarks', () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    // fetchAll=true → called with key only (no limit/offset)
-    expect(getBookmarks).toHaveBeenCalledWith(mockCryptoKey);
+    // fetchAll=true → no limit/offset; only a signal is passed for abort support
+    const call = vi.mocked(getBookmarks).mock.calls[0];
+    expect(call[1]).not.toHaveProperty('limit');
+    expect(call[1]).not.toHaveProperty('offset');
   });
 
   it('when search is active, hasMore is always false', async () => {

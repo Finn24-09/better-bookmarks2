@@ -30,7 +30,7 @@ export async function getTags(
     signal: options?.signal,
   });
   return Promise.all(
-    rows.map(async (r) => ({ id: r.id, name: await decrypt(key, r.name_enc) })),
+    (rows ?? []).map(async (r) => ({ id: r.id, name: await decrypt(key, r.name_enc) })),
   );
 }
 
