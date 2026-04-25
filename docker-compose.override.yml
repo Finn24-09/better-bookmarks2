@@ -23,6 +23,8 @@ services:
       - "8080:8080"
     profiles:
       - adminer
+    networks:
+      - betterbookmarks2
 
   # Run with: docker compose run --rm test
   test:
@@ -46,3 +48,5 @@ services:
         -f /tests/tests.sql
     profiles:
       - test
+    networks:
+      - betterbookmarks2
