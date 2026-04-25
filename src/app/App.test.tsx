@@ -19,6 +19,7 @@ vi.mock('./contexts/AuthContext', () => ({
     cryptoKey: {} as CryptoKey,
     userId: 'user-1',
     email: 'user@example.com',
+    partialRotation: null,
     logout: vi.fn(),
   }),
 }));
@@ -57,6 +58,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     tagIds: [],
     createdAt: '',
     updatedAt: '',
+    keyVersion: 1,
+    thumbnailKeyVersion: null,
     ...overrides,
   };
 }

@@ -96,30 +96,30 @@ describe('apiFetch', () => {
     expect(err.message).toBe('You do not have permission to perform this action.');
   });
 
-  it('throws ApiError with PostgREST message for 403 on auth RPCs (wrong current password)', async () => {
+  it('throws ApiError with generic message for 403 on auth RPCs (S-2: 403 is not passed through)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 403,
       json: async () => ({ message: 'Invalid credentials' }),
     }));
 
-    await expect(apiFetch('/rpc/change_password')).rejects.toMatchObject({
-      status: 403,
-      message: 'Invalid credentials',
-    });
+    const err = await apiFetch('/rpc/change_password').catch((e) => e) as ApiError;
+    expect(err.status).toBe(403);
+    // 403 is no longer relayed for auth RPCs — generic message prevents info leakage.
+    expect(err.message).toBe('You do not have permission to perform this action.');
   });
 
-  it('throws ApiError with PostgREST message for 401 on auth RPCs (sign_in error is user-friendly)', async () => {
+  it('throws ApiError with generic message for 401 on auth RPCs (S-2: 401 is not passed through)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
       json: async () => ({ message: 'Invalid email or password' }),
     }));
 
-    await expect(apiFetch('/rpc/sign_in')).rejects.toMatchObject({
-      status: 401,
-      message: 'Invalid email or password',
-    });
+    const err = await apiFetch('/rpc/sign_in').catch((e) => e) as ApiError;
+    expect(err.status).toBe(401);
+    // 401 is no longer relayed for auth RPCs — only 400 and 409 are intentional user errors.
+    expect(err.message).toBe('Authentication required. Please sign in.');
   });
 
   it('throws ApiError with generic message for 401 on non-auth paths (no schema leakage)', async () => {

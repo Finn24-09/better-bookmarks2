@@ -21,6 +21,7 @@ vi.mock('../contexts/AuthContext', () => ({
 vi.mock('../../lib/auth', () => ({
   changePassword: vi.fn(),
   signIn: vi.fn(),
+  rotationStatus: vi.fn(),
 }));
 
 vi.mock('../../lib/crypto', () => ({
@@ -38,7 +39,11 @@ vi.mock('../../lib/tags', () => ({
 }));
 
 vi.mock('../../lib/thumbnails', () => ({
-  reencryptThumbnail: vi.fn(),
+  reencryptThumbnailToBody: vi.fn(),
+}));
+
+vi.mock('../../lib/api', () => ({
+  apiFetch: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Suppress toast calls in tests (no Toaster rendered)
@@ -46,11 +51,11 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-import { changePassword, signIn } from '../../lib/auth';
+import { changePassword, signIn, rotationStatus } from '../../lib/auth';
 import { deriveKey } from '../../lib/crypto';
 import { getBookmarks, reencryptBookmark } from '../../lib/bookmarks';
 import { getTags, reencryptTag } from '../../lib/tags';
-import { reencryptThumbnail } from '../../lib/thumbnails';
+import { reencryptThumbnailToBody } from '../../lib/thumbnails';
 import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +67,7 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     id: 'bm-1', title: 'Test', url: 'https://a.com',
     thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null,
     tagIds: [], createdAt: '', updatedAt: '',
+    keyVersion: 1, thumbnailKeyVersion: null,
     ...overrides,
   };
 }
@@ -73,11 +79,12 @@ describe('ChangePasswordModal', () => {
     vi.clearAllMocks();
     // Default: pre-flight signIn succeeds, user has no bookmarks or tags
     vi.mocked(signIn).mockResolvedValue({ token: 't', user_id: 'u' } as never);
+    vi.mocked(rotationStatus).mockResolvedValue({ keyVersion: 1, hasStaleRecords: false });
     vi.mocked(getBookmarks).mockResolvedValue([]);
     vi.mocked(getTags).mockResolvedValue([]);
     vi.mocked(reencryptBookmark).mockResolvedValue(undefined);
     vi.mocked(reencryptTag).mockResolvedValue(undefined);
-    vi.mocked(reencryptThumbnail).mockResolvedValue(undefined);
+    vi.mocked(reencryptThumbnailToBody).mockResolvedValue({ imageId: '', data_enc: '', original_name_enc: '' });
   });
 
   function renderModal(open = true, onClose = vi.fn()) {
@@ -195,13 +202,13 @@ describe('ChangePasswordModal', () => {
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
-      expect(reencryptBookmark).toHaveBeenCalledWith(bm, newKey);
+      expect(reencryptBookmark).toHaveBeenCalledWith(bm, newKey, 2);
     });
   });
 
   it('re-encrypts each tag name with the new key', async () => {
     const newKey = {} as CryptoKey;
-    const tag = { id: 'tag-1', name: 'Work' };
+    const tag = { id: 'tag-1', name: 'Work', keyVersion: 1 };
     vi.mocked(deriveKey).mockResolvedValue(newKey);
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
     vi.mocked(getTags).mockResolvedValue([tag]);
@@ -214,16 +221,13 @@ describe('ChangePasswordModal', () => {
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
-      expect(reencryptTag).toHaveBeenCalledWith('tag-1', 'Work', newKey);
+      expect(reencryptTag).toHaveBeenCalledWith('tag-1', 'Work', newKey, 2);
     });
   });
 
-  it('re-encrypts thumbnail binary files with old and new keys', async () => {
-    const newKey = {} as CryptoKey;
-    const bm = makeBookmark({ thumbnailFileId: 'img-1', thumbnailOriginalName: 'photo.jpg' });
-    vi.mocked(deriveKey).mockResolvedValue(newKey);
+  it('calls rotationStatus() to get the current key version before re-encrypting', async () => {
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
-    vi.mocked(getBookmarks).mockResolvedValue([bm]);
+    vi.mocked(deriveKey).mockResolvedValue({} as CryptoKey);
     const user = userEvent.setup();
     renderModal();
 
@@ -233,7 +237,30 @@ describe('ChangePasswordModal', () => {
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
-      expect(reencryptThumbnail).toHaveBeenCalledWith('img-1', mockCryptoKey, newKey);
+      expect(rotationStatus).toHaveBeenCalled();
+    });
+  });
+
+  it('re-encrypts thumbnail binary files using two-phase approach (crypto then write)', async () => {
+    const newKey = {} as CryptoKey;
+    const bm = makeBookmark({ thumbnailFileId: 'img-1', thumbnailOriginalName: 'photo.jpg' });
+    vi.mocked(deriveKey).mockResolvedValue(newKey);
+    vi.mocked(changePassword).mockResolvedValue(undefined as never);
+    vi.mocked(getBookmarks).mockResolvedValue([bm]);
+    vi.mocked(reencryptThumbnailToBody).mockResolvedValue({
+      imageId: 'img-1', data_enc: 'enc-data', original_name_enc: 'enc-name',
+    });
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
+    await user.click(screen.getByRole('button', { name: /save password/i }));
+
+    await waitFor(() => {
+      // Phase 1: crypto only — should be called with imageId + both keys
+      expect(reencryptThumbnailToBody).toHaveBeenCalledWith('img-1', mockCryptoKey, newKey);
     });
   });
 

@@ -17,6 +17,8 @@ export interface BookmarkRow {
   created_at: string;
   updated_at: string;
   tag_ids: string[];
+  key_version: number;
+  thumbnail_key_version: number | null;
 }
 
 /** Decrypted bookmark ready for the UI. */
@@ -32,6 +34,10 @@ export interface Bookmark {
   tagIds: string[];
   createdAt: string;
   updatedAt: string;
+  /** Encryption key version — incremented on every successful key rotation. */
+  keyVersion: number;
+  /** Key version of the associated thumbnail_images row, or null if no thumbnail. */
+  thumbnailKeyVersion: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,10 +123,14 @@ export async function updateBookmark(
     updated_at: new Date().toISOString(),
   };
 
-  await apiFetch(`/bookmarks?id=eq.${id}`, {
+  const rows = await apiFetch<{ id: string }[]>(`/bookmarks?id=eq.${id}`, {
     method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
     body: JSON.stringify(body),
   });
+  if (!rows || rows.length === 0) {
+    throw new Error('Bookmark not found or update failed');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -128,17 +138,28 @@ export async function updateBookmark(
 // ---------------------------------------------------------------------------
 
 /** Re-encrypt all encrypted fields of a bookmark with a new key. */
-export async function reencryptBookmark(bm: Bookmark, newKey: CryptoKey): Promise<void> {
-  const body: Record<string, string | null> = {
+export async function reencryptBookmark(
+  bm: Bookmark,
+  newKey: CryptoKey,
+  targetVersion: number,
+): Promise<void> {
+  const body: Record<string, string | number | null> = {
     title_enc: await encrypt(newKey, bm.title),
     url_enc: await encrypt(newKey, bm.url),
     thumbnail_url_enc: bm.thumbnailUrl ? await encrypt(newKey, bm.thumbnailUrl) : null,
     updated_at: new Date().toISOString(),
+    key_version: targetVersion,
   };
   await apiFetch(`/bookmarks?id=eq.${bm.id}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+/** Fetch raw (encrypted) bookmark rows without decrypting — used during key-rotation recovery. */
+export async function getBookmarkRows(): Promise<BookmarkRow[]> {
+  const rows = await apiFetch<BookmarkRow[]>('/bookmarks_with_tags?order=created_at.desc');
+  return rows ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +174,7 @@ export async function deleteBookmark(id: string): Promise<void> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function decryptBookmark(row: BookmarkRow, key: CryptoKey): Promise<Bookmark> {
+export async function decryptBookmark(row: BookmarkRow, key: CryptoKey): Promise<Bookmark> {
   const [title, url, thumbnailUrl, thumbnailOriginalName] = await Promise.all([
     decrypt(key, row.title_enc),
     decrypt(key, row.url_enc),
@@ -172,5 +193,7 @@ async function decryptBookmark(row: BookmarkRow, key: CryptoKey): Promise<Bookma
     tagIds: row.tag_ids ?? [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    keyVersion: row.key_version ?? 1,
+    thumbnailKeyVersion: row.thumbnail_key_version ?? null,
   };
 }

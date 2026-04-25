@@ -92,5 +92,5 @@ export async function computeHmac(userId: string, text: string): Promise<string>
     ['sign'],
   );
   const signature = await crypto.subtle.sign('HMAC', keyMaterial, enc.encode(text));
-  return btoa(String.fromCharCode(...new Uint8Array(signature)));
+  return bytesToBase64(new Uint8Array(signature));
 }

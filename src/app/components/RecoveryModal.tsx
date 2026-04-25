@@ -1,0 +1,167 @@
+import { useRef } from "react";
+import { useForm } from "react-hook-form";
+import { AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
+import { signIn, changePassword, rotationStatus } from "../../lib/auth";
+import { deriveKey, decrypt } from "../../lib/crypto";
+import { getBookmarkRows, reencryptBookmark, decryptBookmark } from "../../lib/bookmarks";
+import { getTagRows, reencryptTag } from "../../lib/tags";
+import { reencryptThumbnailToBody } from "../../lib/thumbnails";
+import { apiFetch } from "../../lib/api";
+import { useAuth } from "../contexts/AuthContext";
+
+interface RecoveryModalProps {
+  keyVersion: number;
+}
+
+interface FormFields {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export function RecoveryModal({ keyVersion: _keyVersion }: RecoveryModalProps) {
+  const { email, cryptoKey, updateKey, clearPartialRotation } = useAuth();
+  const isRecoveringRef = useRef(false);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<FormFields>();
+
+  const onSubmit = async (data: FormFields) => {
+    if (isRecoveringRef.current) return;
+    isRecoveringRef.current = true;
+
+    try {
+      if (!cryptoKey || !email) throw new Error("Not authenticated");
+
+      await signIn(email, data.currentPassword);
+
+      const newKey = await deriveKey(data.newPassword, email);
+
+      const status = await rotationStatus();
+      const targetVersion = status.keyVersion + 1;
+
+      if (!status.hasStaleRecords) {
+        // Rotation already complete — just commit the password change.
+        await changePassword(data.currentPassword, data.newPassword);
+        updateKey(newKey);
+        clearPartialRotation();
+        toast.success("Account recovered");
+        return;
+      }
+
+      const [bookmarkRows, tagRows] = await Promise.all([
+        getBookmarkRows(),
+        getTagRows(),
+      ]);
+
+      // Re-encrypt stale bookmark text fields.
+      const staleBookmarkRows = bookmarkRows.filter((r) => r.key_version < targetVersion);
+      const staleBookmarks = await Promise.all(
+        staleBookmarkRows.map((r) => decryptBookmark(r, cryptoKey)),
+      );
+      await Promise.all(
+        staleBookmarks.map((bm) => reencryptBookmark(bm, newKey, targetVersion)),
+      );
+
+      // Re-encrypt stale thumbnail binary files (two-phase).
+      const staleThumbRows = staleBookmarkRows.filter(
+        (r) => r.thumbnail_file_id && (r.thumbnail_key_version ?? 0) < targetVersion,
+      );
+      const thumbBodies = await Promise.all(
+        staleThumbRows.map((r) =>
+          reencryptThumbnailToBody(r.thumbnail_file_id!, cryptoKey, newKey),
+        ),
+      );
+      await Promise.all(
+        thumbBodies.map(({ imageId, data_enc, original_name_enc }) =>
+          apiFetch(`/thumbnail_images?id=eq.${imageId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ data_enc, original_name_enc, key_version: targetVersion }),
+          }),
+        ),
+      );
+
+      // Re-encrypt stale tag names — decrypt with old key first, then re-encrypt with new.
+      const staleTagRows = tagRows.filter((r) => r.key_version < targetVersion);
+      await Promise.all(
+        staleTagRows.map(async (r) => {
+          const name = await decrypt(cryptoKey, r.name_enc);
+          return reencryptTag(r.id, name, newKey, targetVersion);
+        }),
+      );
+
+      await changePassword(data.currentPassword, data.newPassword);
+      updateKey(newKey);
+      clearPartialRotation();
+      toast.success("Account recovered");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Recovery failed. Please try again.");
+    } finally {
+      isRecoveringRef.current = false;
+    }
+  };
+
+  const inputCls =
+    "w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300";
+  const errorInputCls =
+    "w-full bg-white/5 border border-red-500/60 rounded-2xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-red-500/80 transition-all duration-300";
+
+  return (
+    <div className="fixed inset-0 bg-linear-to-br from-slate-950 via-purple-950 to-slate-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl shadow-purple-500/20 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-amber-500/20 border border-amber-500/30 rounded-full flex items-center justify-center">
+            <AlertTriangle className="w-5 h-5 text-amber-400" />
+          </div>
+          <h1 className="text-lg font-semibold text-white">Incomplete Password Change Detected</h1>
+        </div>
+
+        <p className="text-sm text-white/70 mb-6">
+          A previous password change was interrupted before it could complete. Enter your old and
+          intended new password to finish re-encrypting your data.
+        </p>
+
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-sm text-white/70">Current (old) password</label>
+            <input
+              type="password"
+              placeholder="Enter current password…"
+              autoComplete="current-password"
+              className={errors.currentPassword ? errorInputCls : inputCls}
+              {...register("currentPassword", { required: "Required" })}
+            />
+            {errors.currentPassword && (
+              <p className="text-xs text-red-400">{errors.currentPassword.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm text-white/70">Intended new password</label>
+            <input
+              type="password"
+              placeholder="Enter new password…"
+              autoComplete="new-password"
+              className={errors.newPassword ? errorInputCls : inputCls}
+              {...register("newPassword", { required: "Required" })}
+            />
+            {errors.newPassword && (
+              <p className="text-xs text-red-400">{errors.newPassword.message}</p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full px-6 py-3 bg-linear-to-br from-purple-600 to-purple-800 text-white rounded-full hover:scale-105 active:scale-95 transition-all duration-300 text-sm font-medium shadow-lg shadow-purple-500/30 disabled:opacity-60 disabled:pointer-events-none"
+          >
+            {isSubmitting ? "Recovering…" : "Recover Account"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}

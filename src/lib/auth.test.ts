@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { signIn, signUp } from './auth';
+import { signIn, signUp, rotationStatus } from './auth';
 import { ApiError, setAuthToken } from './api';
 
 // Minimal fetch response factory.
@@ -35,7 +35,7 @@ describe('auth', () => {
     await expect(signIn('user@example.com', 'wrongpass')).rejects.toMatchObject({ status: 401 });
   });
 
-  it('signIn error message is taken from PostgREST response body', async () => {
+  it('signIn 401 uses generic message — raw PostgREST error no longer relayed (S-2)', async () => {
     vi.stubGlobal('fetch', mockFetch(401, { message: 'Invalid email or password' }));
 
     let caught: unknown;
@@ -45,7 +45,8 @@ describe('auth', () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(ApiError);
-    expect((caught as ApiError).message).toBe('Invalid email or password');
+    // After S-2, 401 is treated as a generic auth failure — only 400/409 pass through.
+    expect((caught as ApiError).message).toBe('Authentication required. Please sign in.');
   });
 
   it('signIn sends request to /api/rpc/sign_in', async () => {
@@ -95,5 +96,36 @@ describe('auth', () => {
     await expect(
       (await import('./auth')).changePassword('wrongcurrent', 'newpass123'),
     ).rejects.toMatchObject({ status: 401 });
+  });
+
+  // -------------------------------------------------------------------------
+  // rotationStatus
+  // -------------------------------------------------------------------------
+  it('rotationStatus sends POST to /rpc/rotation_status', async () => {
+    const spy = mockFetch(200, { key_version: 1, has_stale_records: false });
+    vi.stubGlobal('fetch', spy);
+    setAuthToken('test-token');
+
+    await rotationStatus();
+
+    const [url, opts] = spy.mock.calls[0];
+    expect(url).toContain('/rpc/rotation_status');
+    expect(opts.method).toBe('POST');
+  });
+
+  it('rotationStatus returns camelCase-mapped shape', async () => {
+    vi.stubGlobal('fetch', mockFetch(200, { key_version: 3, has_stale_records: true }));
+    setAuthToken('test-token');
+
+    const result = await rotationStatus();
+    expect(result.keyVersion).toBe(3);
+    expect(result.hasStaleRecords).toBe(true);
+  });
+
+  it('rotationStatus throws when the fetch fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }));
+    setAuthToken('test-token');
+
+    await expect(rotationStatus()).rejects.toBeInstanceOf(ApiError);
   });
 });

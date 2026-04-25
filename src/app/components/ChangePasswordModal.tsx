@@ -11,11 +11,12 @@ import {
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
 import { PasswordStrengthHints } from "./PasswordStrengthHints";
-import { changePassword, signIn } from "../../lib/auth";
+import { changePassword, signIn, rotationStatus } from "../../lib/auth";
 import { deriveKey } from "../../lib/crypto";
 import { getBookmarks, reencryptBookmark } from "../../lib/bookmarks";
 import { getTags, reencryptTag } from "../../lib/tags";
-import { reencryptThumbnail } from "../../lib/thumbnails";
+import { reencryptThumbnailToBody } from "../../lib/thumbnails";
+import { apiFetch } from "../../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 
 interface ChangePasswordModalProps {
@@ -69,6 +70,9 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
       // while the DB is still untouched prevents any partial re-encryption.
       await signIn(email, data.currentPassword);
 
+      const status = await rotationStatus();
+      const targetVersion = status.keyVersion + 1;
+
       const newKey = await deriveKey(data.newPassword, email);
 
       // Fetch all data to re-encrypt while we still have the current key.
@@ -78,17 +82,27 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
       ]);
 
       // Re-encrypt bookmark fields (title, url, thumbnail URL).
-      await Promise.all(allBookmarks.map((bm) => reencryptBookmark(bm, newKey)));
+      await Promise.all(allBookmarks.map((bm) => reencryptBookmark(bm, newKey, targetVersion)));
 
-      // Re-encrypt thumbnail binary files stored in thumbnail_images.
-      await Promise.all(
+      // Re-encrypt thumbnail binary files using a two-phase approach:
+      // Phase 1: all crypto in memory (no DB writes yet).
+      // Phase 2: all DB writes (no crypto). Cleaner failure modes if interrupted.
+      const thumbBodies = await Promise.all(
         allBookmarks
           .filter((bm) => bm.thumbnailFileId)
-          .map((bm) => reencryptThumbnail(bm.thumbnailFileId!, cryptoKey, newKey)),
+          .map((bm) => reencryptThumbnailToBody(bm.thumbnailFileId!, cryptoKey, newKey)),
+      );
+      await Promise.all(
+        thumbBodies.map(({ imageId, data_enc, original_name_enc }) =>
+          apiFetch(`/thumbnail_images?id=eq.${imageId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ data_enc, original_name_enc, key_version: targetVersion }),
+          }),
+        ),
       );
 
       // Re-encrypt tag names (name_hmac is keyed on userId, not password — unchanged).
-      await Promise.all(allTags.map((tag) => reencryptTag(tag.id, tag.name, newKey)));
+      await Promise.all(allTags.map((tag) => reencryptTag(tag.id, tag.name, newKey, targetVersion)));
 
       // Only update the DB password after all re-encryption succeeds.
       await changePassword(data.currentPassword, data.newPassword);

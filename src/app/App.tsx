@@ -13,9 +13,19 @@ import { DeleteAccountModal } from "./components/DeleteAccountModal";
 import { ImportBookmarksModal } from "./components/ImportBookmarksModal";
 import { ExportBookmarksModal } from "./components/ExportBookmarksModal";
 import { useBookmarks } from "./hooks/useBookmarks";
+import { useAuth } from "./contexts/AuthContext";
+import { RecoveryModal } from "./components/RecoveryModal";
 import type { Bookmark } from "../lib/bookmarks";
 
 export default function App() {
+  const { partialRotation } = useAuth();
+  if (partialRotation !== null) {
+    return <RecoveryModal keyVersion={partialRotation.keyVersion} />;
+  }
+  return <AppContent />;
+}
+
+function AppContent() {
   // --------------------------------------------------------------------------
   // Lifted search/filter state (Phase 4)
   // --------------------------------------------------------------------------

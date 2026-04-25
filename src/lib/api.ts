@@ -56,7 +56,7 @@ export async function apiFetch<T = unknown>(
     };
 
     let message = STATUS_MESSAGES[response.status] ?? `Request failed (${response.status})`;
-    if (isAuthRpc && (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 409)) {
+    if (isAuthRpc && (response.status === 400 || response.status === 409)) {
       try {
         const body = await response.json();
         message = body.message ?? body.hint ?? message;

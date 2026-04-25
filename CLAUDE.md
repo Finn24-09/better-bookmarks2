@@ -68,7 +68,7 @@ src/
     └── importJson.ts   # parseJsonExport / validateJsonFile
 ```
 
-**Routing:** React Router v7. `/` requires auth (redirects to `/auth` if no session). `/auth` redirects to `/` if already authenticated.
+**Routing:** React Router v7. `/` requires auth (redirects to `/login` if no session). `/login` redirects to `/` if already authenticated.
 
 **Dev proxy:** Vite proxies `/api/*` → `http://localhost:3000` (strips `/api` prefix). PostgREST must run on port 3000 locally. Production uses the Nginx reverse proxy in `docker/frontend/nginx.conf`.
 

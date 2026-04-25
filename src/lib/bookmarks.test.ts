@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createBookmark, updateBookmark, deleteBookmark, reencryptBookmark } from './bookmarks';
-import type { Bookmark } from './bookmarks';
+import { createBookmark, updateBookmark, deleteBookmark, reencryptBookmark, getBookmarkRows, decryptBookmark } from './bookmarks';
+import type { Bookmark, BookmarkRow } from './bookmarks';
 import { deriveKey, decrypt } from './crypto';
 import { setAuthToken } from './api';
 
@@ -19,14 +19,15 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     tagIds: [],
     createdAt: '2024-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
+    keyVersion: 1,
+    thumbnailKeyVersion: null,
     ...overrides,
   };
 }
 
-// Minimal bookmark row for POST response
-function bookmarkRow(id = 'bm-1') {
-  return [{
-    id,
+function makeRow(overrides: Partial<BookmarkRow> = {}): BookmarkRow {
+  return {
+    id: 'bm-1',
     user_id: USER_ID,
     title_enc: 'x',
     url_enc: 'x',
@@ -36,7 +37,15 @@ function bookmarkRow(id = 'bm-1') {
     created_at: '',
     updated_at: '',
     tag_ids: [],
-  }];
+    key_version: 1,
+    thumbnail_key_version: null,
+    ...overrides,
+  };
+}
+
+// Minimal bookmark row for POST response
+function bookmarkRow(id = 'bm-1') {
+  return [makeRow({ id })];
 }
 
 describe('bookmarks', () => {
@@ -125,7 +134,7 @@ describe('bookmarks', () => {
   // updateBookmark — request method + URL
   // -------------------------------------------------------------------------
   it('updateBookmark sends a PATCH request', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [{ id: 'bm-abc' }] });
 
     await updateBookmark('bm-abc', { title: 'Updated', url: 'https://new.com' }, key);
 
@@ -133,7 +142,7 @@ describe('bookmarks', () => {
   });
 
   it('updateBookmark sends request to the correct filtered URL', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [{ id: 'bm-abc' }] });
 
     await updateBookmark('bm-abc', { title: 'Updated', url: 'https://new.com' }, key);
 
@@ -142,13 +151,21 @@ describe('bookmarks', () => {
   });
 
   it('updateBookmark encrypts fields in the PATCH body', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [{ id: 'bm-abc' }] });
 
     await updateBookmark('bm-abc', { title: 'Updated Title', url: 'https://new.com' }, key);
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.title_enc).not.toBe('Updated Title');
     expect(body.url_enc).not.toBe('https://new.com');
+  });
+
+  it('updateBookmark throws when PostgREST returns empty array (bookmark not found or no RLS access)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+
+    await expect(
+      updateBookmark('bm-missing', { title: 'T', url: 'https://x.com' }, key),
+    ).rejects.toThrow('Bookmark not found or update failed');
   });
 
   // -------------------------------------------------------------------------
@@ -192,7 +209,7 @@ describe('bookmarks', () => {
   });
 
   it('updateBookmark sends thumbnail_file_id when provided', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [{ id: 'bm-abc' }] });
 
     await updateBookmark(
       'bm-abc',
@@ -214,18 +231,13 @@ describe('bookmarks', () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => [{
+      json: async () => [makeRow({
         id: 'bm-1',
-        user_id: USER_ID,
         title_enc: encTitle,
         url_enc: encUrl,
-        thumbnail_url_enc: null,
         thumbnail_file_id: 'img-1',
         thumbnail_original_name_enc: encName,
-        created_at: '',
-        updated_at: '',
-        tag_ids: [],
-      }],
+      })],
     });
 
     const { getBookmarks } = await import('./bookmarks');
@@ -240,14 +252,14 @@ describe('bookmarks', () => {
   // -------------------------------------------------------------------------
   it('reencryptBookmark does NOT include thumbnail_original_name_enc in the PATCH body', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
-    await reencryptBookmark(makeBookmark(), key);
+    await reencryptBookmark(makeBookmark(), key, 2);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body).not.toHaveProperty('thumbnail_original_name_enc');
   });
 
   it('reencryptBookmark includes title_enc, url_enc, and thumbnail_url_enc in the PATCH body', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
-    await reencryptBookmark(makeBookmark(), key);
+    await reencryptBookmark(makeBookmark(), key, 2);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body).toHaveProperty('title_enc');
     expect(body).toHaveProperty('url_enc');
@@ -256,23 +268,94 @@ describe('bookmarks', () => {
 
   it('reencryptBookmark sends PATCH to the correct bookmark URL', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
-    await reencryptBookmark(makeBookmark({ id: 'bm-42' }), key);
+    await reencryptBookmark(makeBookmark({ id: 'bm-42' }), key, 2);
     expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
     expect(fetchMock.mock.calls[0][0] as string).toContain('/bookmarks?id=eq.bm-42');
   });
 
   it('reencryptBookmark re-encrypts title so ciphertext differs from plaintext', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
-    await reencryptBookmark(makeBookmark({ title: 'Secret Title' }), key);
+    await reencryptBookmark(makeBookmark({ title: 'Secret Title' }), key, 2);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.title_enc).not.toBe('Secret Title');
   });
 
   it('reencryptBookmark sets thumbnail_url_enc to null when thumbnailUrl is null', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
-    await reencryptBookmark(makeBookmark({ thumbnailUrl: null }), key);
+    await reencryptBookmark(makeBookmark({ thumbnailUrl: null }), key, 2);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.thumbnail_url_enc).toBeNull();
+  });
+
+  it('reencryptBookmark includes key_version: targetVersion in the PATCH body', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+    await reencryptBookmark(makeBookmark(), key, 5);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.key_version).toBe(5);
+  });
+
+  // -------------------------------------------------------------------------
+  // decryptBookmark — key_version mapping
+  // -------------------------------------------------------------------------
+  it('decryptBookmark maps key_version to keyVersion on the Bookmark', async () => {
+    const row = makeRow({ key_version: 3 });
+    // Use real encryption for title/url fields
+    const { encrypt } = await import('./crypto');
+    row.title_enc = await encrypt(key, 'Test');
+    row.url_enc = await encrypt(key, 'https://test.com');
+
+    const bm = await decryptBookmark(row, key);
+    expect(bm.keyVersion).toBe(3);
+  });
+
+  it('decryptBookmark maps thumbnail_key_version to thumbnailKeyVersion', async () => {
+    const { encrypt } = await import('./crypto');
+    const row = makeRow({ thumbnail_key_version: 2 });
+    row.title_enc = await encrypt(key, 'Test');
+    row.url_enc = await encrypt(key, 'https://test.com');
+
+    const bm = await decryptBookmark(row, key);
+    expect(bm.thumbnailKeyVersion).toBe(2);
+  });
+
+  it('decryptBookmark sets thumbnailKeyVersion to null when thumbnail_key_version is null', async () => {
+    const { encrypt } = await import('./crypto');
+    const row = makeRow({ thumbnail_key_version: null });
+    row.title_enc = await encrypt(key, 'Test');
+    row.url_enc = await encrypt(key, 'https://test.com');
+
+    const bm = await decryptBookmark(row, key);
+    expect(bm.thumbnailKeyVersion).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // getBookmarkRows — raw fetch without decryption
+  // -------------------------------------------------------------------------
+  it('getBookmarkRows calls /bookmarks_with_tags with order=created_at.desc', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+
+    await getBookmarkRows();
+
+    const url: string = fetchMock.mock.calls[0][0];
+    expect(url).toContain('/bookmarks_with_tags');
+    expect(url).toContain('order=created_at.desc');
+  });
+
+  it('getBookmarkRows returns raw rows without decryption', async () => {
+    const rows = [makeRow({ id: 'bm-raw-1', title_enc: 'enc-title' })];
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => rows });
+
+    const result = await getBookmarkRows();
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('bm-raw-1');
+    expect(result[0].title_enc).toBe('enc-title');
+  });
+
+  it('getBookmarkRows returns empty array when API returns null', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204 });
+
+    const result = await getBookmarkRows();
+    expect(result).toEqual([]);
   });
 
   it('getBookmarks sets thumbnailFileId and thumbnailOriginalName to null when absent', async () => {
@@ -283,18 +366,7 @@ describe('bookmarks', () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => [{
-        id: 'bm-2',
-        user_id: USER_ID,
-        title_enc: encTitle,
-        url_enc: encUrl,
-        thumbnail_url_enc: null,
-        thumbnail_file_id: null,
-        thumbnail_original_name_enc: null,
-        created_at: '',
-        updated_at: '',
-        tag_ids: [],
-      }],
+      json: async () => [makeRow({ id: 'bm-2', title_enc: encTitle, url_enc: encUrl })],
     });
 
     const { getBookmarks } = await import('./bookmarks');

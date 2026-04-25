@@ -35,3 +35,16 @@ export function deleteAccount(password: string): Promise<void> {
     body: JSON.stringify({ password }),
   });
 }
+
+export interface RotationStatus {
+  keyVersion: number;
+  hasStaleRecords: boolean;
+}
+
+export async function rotationStatus(): Promise<RotationStatus> {
+  const raw = await apiFetch<{ key_version: number; has_stale_records: boolean }>(
+    '/rpc/rotation_status',
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+  return { keyVersion: raw.key_version, hasStaleRecords: raw.has_stale_records };
+}

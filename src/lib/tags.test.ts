@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getTags, createTag, setBookmarkTags } from './tags';
+import { getTags, createTag, setBookmarkTags, reencryptTag, getTagRows } from './tags';
 import { deriveKey, decrypt, computeHmac } from './crypto';
 import { setAuthToken } from './api';
 
 const USER_ID = 'user-uuid-123';
 
 function tagRow(id = 'tag-1') {
-  return [{ id, user_id: USER_ID, name_enc: 'x', name_hmac: 'y', created_at: '' }];
+  return [{ id, user_id: USER_ID, name_enc: 'x', name_hmac: 'y', created_at: '', key_version: 1 }];
 }
 
 describe('tags', () => {
@@ -132,12 +132,77 @@ describe('tags', () => {
   });
 
   // -------------------------------------------------------------------------
-  // getTags — null guard (F-3)
+  // getTags — null guard (F-3) and key_version mapping
   // -------------------------------------------------------------------------
   it('getTags returns empty array when apiFetch returns undefined (e.g. 204 response)', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204 });
 
     const result = await getTags(key);
+    expect(result).toEqual([]);
+  });
+
+  it('getTags maps key_version to keyVersion on returned tags', async () => {
+    const { encrypt } = await import('./crypto');
+    const encName = await encrypt(key, 'work');
+
+    fetchMock.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => [{ id: 'tag-1', user_id: USER_ID, name_enc: encName, name_hmac: 'h', created_at: '', key_version: 3 }],
+    });
+
+    const tags = await getTags(key);
+    expect(tags[0].keyVersion).toBe(3);
+  });
+
+  // -------------------------------------------------------------------------
+  // reencryptTag — key_version in PATCH body
+  // -------------------------------------------------------------------------
+  it('reencryptTag includes key_version: targetVersion in the PATCH body', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await reencryptTag('tag-1', 'work', key, 5);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.key_version).toBe(5);
+  });
+
+  it('reencryptTag sends PATCH to the correct tag URL', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await reencryptTag('tag-abc', 'work', key, 2);
+
+    expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
+    expect(fetchMock.mock.calls[0][0] as string).toContain('/tags?id=eq.tag-abc');
+  });
+
+  // -------------------------------------------------------------------------
+  // getTagRows — raw fetch without decryption
+  // -------------------------------------------------------------------------
+  it('getTagRows calls /tags with order=created_at.asc', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+
+    await getTagRows();
+
+    const url: string = fetchMock.mock.calls[0][0];
+    expect(url).toContain('/tags');
+    expect(url).toContain('order=created_at.asc');
+  });
+
+  it('getTagRows returns raw rows without decryption', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => [{ id: 'tag-1', user_id: USER_ID, name_enc: 'enc-name', name_hmac: 'h', created_at: '', key_version: 1 }],
+    });
+
+    const result = await getTagRows();
+    expect(result).toHaveLength(1);
+    expect(result[0].name_enc).toBe('enc-name');
+  });
+
+  it('getTagRows returns empty array when API returns null', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204 });
+
+    const result = await getTagRows();
     expect(result).toEqual([]);
   });
 });

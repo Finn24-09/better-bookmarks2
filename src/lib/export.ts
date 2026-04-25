@@ -213,7 +213,12 @@ export async function exportBookmarks(
 // ---------------------------------------------------------------------------
 
 /** Sanitize a cell value for CSV: quote it, escape internal quotes, and
- *  prefix formula-injection characters with a tab to prevent spreadsheet execution. */
+ *  prefix formula-injection characters with a tab to prevent spreadsheet execution.
+ *  Note: the tab-prefix approach (OWASP-recommended) is non-standard — some versions
+ *  of LibreOffice Calc and Excel still evaluate formulas after stripping leading
+ *  whitespace. Risk is low here (data comes from the user's own bookmarks), but
+ *  a single-quote prefix ('=formula) would be more robust if untrusted data is ever
+ *  added to exports. */
 function csvSanitize(value: string): string {
   let safe = value;
   if (

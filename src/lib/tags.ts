@@ -11,11 +11,13 @@ export interface TagRow {
   name_enc: string;
   name_hmac: string;
   created_at: string;
+  key_version: number;
 }
 
 export interface Tag {
   id: string;
   name: string;
+  keyVersion: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -30,7 +32,11 @@ export async function getTags(
     signal: options?.signal,
   });
   return Promise.all(
-    (rows ?? []).map(async (r) => ({ id: r.id, name: await decrypt(key, r.name_enc) })),
+    (rows ?? []).map(async (r) => ({
+      id: r.id,
+      name: await decrypt(key, r.name_enc),
+      keyVersion: r.key_version ?? 1,
+    })),
   );
 }
 
@@ -61,12 +67,23 @@ export async function createTag(name: string, userId: string, key: CryptoKey): P
  * Re-encrypt a tag's name_enc with a new key.
  * name_hmac is keyed on userId (not the password) so it never changes.
  */
-export async function reencryptTag(id: string, name: string, newKey: CryptoKey): Promise<void> {
+export async function reencryptTag(
+  id: string,
+  name: string,
+  newKey: CryptoKey,
+  targetVersion: number,
+): Promise<void> {
   const name_enc = await encrypt(newKey, name);
   await apiFetch(`/tags?id=eq.${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ name_enc }),
+    body: JSON.stringify({ name_enc, key_version: targetVersion }),
   });
+}
+
+/** Fetch raw (encrypted) tag rows without decrypting — used during key-rotation recovery. */
+export async function getTagRows(): Promise<TagRow[]> {
+  const rows = await apiFetch<TagRow[]>('/tags?order=created_at.asc');
+  return rows ?? [];
 }
 
 // ---------------------------------------------------------------------------

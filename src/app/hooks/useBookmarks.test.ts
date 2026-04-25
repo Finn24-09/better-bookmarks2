@@ -45,6 +45,8 @@ function makeBookmarks(count: number, idOffset = 0): Bookmark[] {
     tagIds: [],
     createdAt: '',
     updatedAt: '',
+    keyVersion: 1,
+    thumbnailKeyVersion: null,
   }));
 }
 
@@ -182,8 +184,8 @@ describe('useBookmarks', () => {
 
   it('search filters bookmarks by title (case-insensitive)', async () => {
     vi.mocked(getBookmarks).mockResolvedValue([
-      { id: 'bm-1', title: 'Hello World', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '' },
-      { id: 'bm-2', title: 'Other Bookmark', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '' },
+      { id: 'bm-1', title: 'Hello World', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
+      { id: 'bm-2', title: 'Other Bookmark', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
     ]);
 
     const { result } = renderHook(() =>
@@ -198,8 +200,8 @@ describe('useBookmarks', () => {
 
   it('search filters bookmarks by URL as well', async () => {
     vi.mocked(getBookmarks).mockResolvedValue([
-      { id: 'bm-1', title: 'A Page', url: 'https://github.com/foo', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '' },
-      { id: 'bm-2', title: 'B Page', url: 'https://example.com/bar', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '' },
+      { id: 'bm-1', title: 'A Page', url: 'https://github.com/foo', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
+      { id: 'bm-2', title: 'B Page', url: 'https://example.com/bar', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: [], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
     ]);
 
     const { result } = renderHook(() =>
@@ -214,8 +216,8 @@ describe('useBookmarks', () => {
 
   it('tag filter narrows results to bookmarks that have the selected tag', async () => {
     vi.mocked(getBookmarks).mockResolvedValue([
-      { id: 'bm-1', title: 'A', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
-      { id: 'bm-2', title: 'B', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '' },
+      { id: 'bm-1', title: 'A', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
+      { id: 'bm-2', title: 'B', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
     ]);
 
     const { result } = renderHook(() =>
@@ -230,9 +232,9 @@ describe('useBookmarks', () => {
 
   it('search and tag filter compose with AND logic', async () => {
     vi.mocked(getBookmarks).mockResolvedValue([
-      { id: 'bm-1', title: 'Hello', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
-      { id: 'bm-2', title: 'Hello', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '' },
-      { id: 'bm-3', title: 'Other', url: 'https://c.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '' },
+      { id: 'bm-1', title: 'Hello', url: 'https://a.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
+      { id: 'bm-2', title: 'Hello', url: 'https://b.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-2'], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
+      { id: 'bm-3', title: 'Other', url: 'https://c.com', thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null, tagIds: ['tag-1'], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null },
     ]);
 
     const { result } = renderHook(() =>
@@ -287,7 +289,7 @@ describe('useBookmarks', () => {
       {
         id: 'bm-1', title: 'T', url: 'https://a.com',
         thumbnailUrl: null, thumbnailFileId: 'img-1', thumbnailOriginalName: 'photo.jpg',
-        tagIds: [], createdAt: '', updatedAt: '',
+        tagIds: [], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null,
       },
     ]);
     vi.mocked(fetchThumbnailObjectUrl).mockResolvedValue('blob:fake-url-1');
@@ -306,7 +308,7 @@ describe('useBookmarks', () => {
     const bm = {
       id: 'bm-1', title: 'T', url: 'https://a.com',
       thumbnailUrl: null, thumbnailFileId: 'img-1', thumbnailOriginalName: null,
-      tagIds: [], createdAt: '', updatedAt: '',
+      tagIds: [], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null,
     };
     vi.mocked(getBookmarks).mockResolvedValue([bm]);
     vi.mocked(fetchThumbnailObjectUrl).mockResolvedValue('blob:cached-url');

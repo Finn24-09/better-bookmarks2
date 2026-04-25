@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
 import { deriveKey } from '../../lib/crypto';
+
+// ---------------------------------------------------------------------------
+// rotationStatus mock
+// ---------------------------------------------------------------------------
+const mockRotationStatus = vi.fn();
+vi.mock('../../lib/auth', () => ({
+  rotationStatus: (...args: unknown[]) => mockRotationStatus(...args),
+}));
 
 function wrapper({ children }: { children: ReactNode }) {
   return <AuthProvider>{children}</AuthProvider>;
@@ -10,8 +18,10 @@ function wrapper({ children }: { children: ReactNode }) {
 
 describe('AuthContext', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
     sessionStorage.clear();
+    mockRotationStatus.mockResolvedValue({ keyVersion: 1, hasStaleRecords: false });
   });
 
   // -------------------------------------------------------------------------
@@ -33,8 +43,8 @@ describe('AuthContext', () => {
     const { result } = renderHook(() => useAuth(), { wrapper });
 
     const key = await deriveKey('password123', 'test@example.com');
-    act(() => {
-      result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
     });
 
     expect(result.current.token).toBe('jwt-token');
@@ -46,8 +56,8 @@ describe('AuthContext', () => {
     const { result } = renderHook(() => useAuth(), { wrapper });
 
     const key = await deriveKey('password123', 'test@example.com');
-    act(() => {
-      result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
     });
 
     expect(result.current.cryptoKey).not.toBeNull();
@@ -57,8 +67,8 @@ describe('AuthContext', () => {
     const { result } = renderHook(() => useAuth(), { wrapper });
 
     const key = await deriveKey('password123', 'test@example.com');
-    act(() => {
-      result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
     });
 
     expect(localStorage.getItem('bb2_token')).toBeNull();
@@ -73,8 +83,8 @@ describe('AuthContext', () => {
     const { result } = renderHook(() => useAuth(), { wrapper });
 
     const key = await deriveKey('password123', 'test@example.com');
-    act(() => {
-      result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
     });
 
     act(() => {
@@ -94,8 +104,8 @@ describe('AuthContext', () => {
     // First mount — log in
     const { result: r1 } = renderHook(() => useAuth(), { wrapper });
     const key = await deriveKey('password123', 'test@example.com');
-    act(() => {
-      r1.current.login('saved-token', 'saved-user', 'test@example.com', key);
+    await act(async () => {
+      await r1.current.login('saved-token', 'saved-user', 'test@example.com', key);
     });
 
     // Second mount simulates a page refresh — state starts completely fresh
@@ -117,5 +127,90 @@ describe('AuthContext', () => {
     expect(result.current.token).toBeNull();
     expect(result.current.cryptoKey).toBeNull();
     expect(result.current.isLoading).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // partialRotation detection
+  // -------------------------------------------------------------------------
+  it('partialRotation is null initially', () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    expect(result.current.partialRotation).toBeNull();
+  });
+
+  it('login() calls rotationStatus() after setting auth state', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    });
+
+    expect(mockRotationStatus).toHaveBeenCalledOnce();
+  });
+
+  it('leaves partialRotation null when rotationStatus returns hasStaleRecords: false', async () => {
+    mockRotationStatus.mockResolvedValue({ keyVersion: 2, hasStaleRecords: false });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    });
+
+    expect(result.current.partialRotation).toBeNull();
+  });
+
+  it('sets partialRotation when rotationStatus returns hasStaleRecords: true', async () => {
+    mockRotationStatus.mockResolvedValue({ keyVersion: 3, hasStaleRecords: true });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    });
+
+    expect(result.current.partialRotation).toEqual({ keyVersion: 3 });
+  });
+
+  it('does NOT throw when rotationStatus() rejects', async () => {
+    mockRotationStatus.mockRejectedValue(new Error('network error'));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await expect(
+      act(async () => { await result.current.login('jwt-token', 'user-1', 'test@example.com', key); }),
+    ).resolves.not.toThrow();
+
+    expect(result.current.partialRotation).toBeNull();
+  });
+
+  it('clearPartialRotation() sets partialRotation back to null', async () => {
+    mockRotationStatus.mockResolvedValue({ keyVersion: 2, hasStaleRecords: true });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    });
+    expect(result.current.partialRotation).not.toBeNull();
+
+    act(() => { result.current.clearPartialRotation(); });
+
+    await waitFor(() => expect(result.current.partialRotation).toBeNull());
+  });
+
+  it('logout() clears partialRotation', async () => {
+    mockRotationStatus.mockResolvedValue({ keyVersion: 1, hasStaleRecords: true });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await act(async () => {
+      await result.current.login('jwt-token', 'user-1', 'test@example.com', key);
+    });
+    expect(result.current.partialRotation).not.toBeNull();
+
+    act(() => { result.current.logout(); });
+
+    await waitFor(() => expect(result.current.partialRotation).toBeNull());
   });
 });
