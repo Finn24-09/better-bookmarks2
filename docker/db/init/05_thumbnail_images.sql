@@ -83,11 +83,16 @@ CREATE POLICY thumb_delete ON api.thumbnail_images
   FOR DELETE TO app_user
   USING (user_id = api.current_user_id());
 
--- No UPDATE policy — images are immutable once uploaded
+-- UPDATE policy: required for key rotation (reencryptThumbnail PATCHes data_enc + original_name_enc).
+-- Users may only update their own images.
+CREATE POLICY thumb_update ON api.thumbnail_images
+  FOR UPDATE TO app_user
+  USING  (user_id = api.current_user_id())
+  WITH CHECK (user_id = api.current_user_id());
 
 -- ---------------------------------------------------------------------------
 -- Grants
 -- ---------------------------------------------------------------------------
 
-GRANT SELECT, INSERT, DELETE ON api.thumbnail_images TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON api.thumbnail_images TO app_user;
 REVOKE ALL ON api.thumbnail_images FROM anon;

@@ -76,8 +76,17 @@ BEGIN
   IF email IS NULL OR trim(email) = '' THEN
     RAISE EXCEPTION 'Email is required' USING ERRCODE = 'check_violation';
   END IF;
-  IF password IS NULL OR length(password) < 8 THEN
-    RAISE EXCEPTION 'Password must be at least 8 characters' USING ERRCODE = 'check_violation';
+  IF password IS NULL OR length(password) < 12 THEN
+    RAISE EXCEPTION 'Password must be at least 12 characters' USING ERRCODE = 'check_violation';
+  END IF;
+  IF password !~ '[A-Z]' THEN
+    RAISE EXCEPTION 'Password must include an uppercase letter' USING ERRCODE = 'check_violation';
+  END IF;
+  IF password !~ '[a-z]' THEN
+    RAISE EXCEPTION 'Password must include a lowercase letter' USING ERRCODE = 'check_violation';
+  END IF;
+  IF password !~ '[^a-zA-Z]' THEN
+    RAISE EXCEPTION 'Password must include a number or symbol' USING ERRCODE = 'check_violation';
   END IF;
 
   -- Hash password with bcrypt, work factor 13 (irreversible)
@@ -165,8 +174,17 @@ BEGIN
     RAISE EXCEPTION 'Not authenticated' USING ERRCODE = 'insufficient_privilege';
   END IF;
 
-  IF new_password IS NULL OR length(new_password) < 8 THEN
-    RAISE EXCEPTION 'New password must be at least 8 characters' USING ERRCODE = 'check_violation';
+  IF new_password IS NULL OR length(new_password) < 12 THEN
+    RAISE EXCEPTION 'New password must be at least 12 characters' USING ERRCODE = 'check_violation';
+  END IF;
+  IF new_password !~ '[A-Z]' THEN
+    RAISE EXCEPTION 'New password must include an uppercase letter' USING ERRCODE = 'check_violation';
+  END IF;
+  IF new_password !~ '[a-z]' THEN
+    RAISE EXCEPTION 'New password must include a lowercase letter' USING ERRCODE = 'check_violation';
+  END IF;
+  IF new_password !~ '[^a-zA-Z]' THEN
+    RAISE EXCEPTION 'New password must include a number or symbol' USING ERRCODE = 'check_violation';
   END IF;
 
   -- Verify current password
