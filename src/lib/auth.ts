@@ -3,6 +3,7 @@ import { apiFetch } from './api';
 export interface AuthResult {
   token: string;
   user_id: string;
+  email_verified: boolean;
 }
 
 export function signUp(email: string, password: string): Promise<AuthResult> {

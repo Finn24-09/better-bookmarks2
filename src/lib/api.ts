@@ -17,6 +17,10 @@ export function setAuthToken(token: string | null): void {
   _token = token;
 }
 
+export function getToken(): string | null {
+  return _token;
+}
+
 /**
  * Base fetch wrapper. Prepends /api, injects Bearer token from memory,
  * and converts non-OK responses to ApiError using PostgREST's error format.
