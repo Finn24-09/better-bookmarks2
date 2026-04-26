@@ -1,0 +1,61 @@
+import type { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
+import bcrypt from 'bcryptjs';
+import { pool } from '../db.js';
+import { hashToken } from '../tokens.js';
+import { config } from '../config.js';
+
+const bodySchema = z.object({
+  new_password: z.string().min(8).max(128),
+});
+
+export const confirmResetRoute: FastifyPluginAsync = async (fastify) => {
+  fastify.post('/confirm-reset', async (req, reply) => {
+    const cookieToken = req.cookies?.['reset_token'];
+    if (!cookieToken || cookieToken.length > 256) {
+      return reply.status(400).send({ error: 'Invalid request' });
+    }
+
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Invalid request' });
+    }
+
+    const tokenHash = hashToken(cookieToken);
+    const pwHash = await bcrypt.hash(parsed.data.new_password, 12);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Atomically redeem token — user_id comes only from this result, never from user input (C-3)
+      const redeemResult = await client.query<{ user_id: string }>(
+        `SELECT user_id FROM auth.redeem_email_token($1, 'password_reset')`,
+        [tokenHash],
+      );
+      if (!redeemResult.rowCount) {
+        await client.query('ROLLBACK');
+        return reply.status(400).send({ error: 'Invalid request' });
+      }
+
+      const userId = redeemResult.rows[0].user_id;
+      await client.query('SELECT auth.reset_password_destroy_data($1, $2)', [userId, pwHash]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      req.log.error({ err }, 'confirmReset: transaction failed');
+      return reply.status(500).send({ error: 'Internal error' });
+    } finally {
+      client.release();
+    }
+
+    reply.clearCookie('reset_token', {
+      httpOnly: true,
+      secure: config.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/api/email/confirm-reset',
+    });
+
+    return reply.status(200).send({ ok: true });
+  });
+};
