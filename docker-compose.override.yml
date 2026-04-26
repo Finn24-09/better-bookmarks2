@@ -10,6 +10,10 @@ services:
     ports:
       - "3000:3000"        # expose for Vite dev proxy (npm run dev)
 
+  email-service:
+    ports:
+      - "5001:5001"  # expose for Vite dev proxy (npm run dev)
+
   # Run with: docker compose --profile adminer up
   adminer:
     image: adminer:4.8.1
