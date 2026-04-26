@@ -12,6 +12,7 @@ import { ChangePasswordModal } from "./components/ChangePasswordModal";
 import { DeleteAccountModal } from "./components/DeleteAccountModal";
 import { ImportBookmarksModal } from "./components/ImportBookmarksModal";
 import { ExportBookmarksModal } from "./components/ExportBookmarksModal";
+import { EmailVerificationBanner } from "./components/EmailVerificationBanner";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { useAuth } from "./contexts/AuthContext";
 import { RecoveryModal } from "./components/RecoveryModal";
@@ -25,7 +26,37 @@ export default function App() {
   return <AppContent />;
 }
 
+function useHashFragmentHandler() {
+  const { setEmailVerified } = useAuth();
+  const [deleteToken, setDeleteToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash) return;
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+    if (hash.startsWith('#email-verified')) {
+      const params = new URLSearchParams(hash.slice('#email-verified'.length));
+      if (params.get('success') === 'true') {
+        setEmailVerified(true);
+        toast.success('Email verified successfully.');
+      } else {
+        toast.error('Email verification failed. The link may have expired.');
+      }
+    } else if (hash.startsWith('#delete-confirmed')) {
+      const params = new URLSearchParams(hash.slice('#delete-confirmed'.length));
+      const token = params.get('token');
+      if (token) setDeleteToken(token);
+    }
+  }, [setEmailVerified]);
+
+  return { deleteToken, clearDeleteToken: () => setDeleteToken(null) };
+}
+
 function AppContent() {
+  const { emailVerified } = useAuth();
+  const { deleteToken, clearDeleteToken } = useHashFragmentHandler();
+
   // --------------------------------------------------------------------------
   // Lifted search/filter state (Phase 4)
   // --------------------------------------------------------------------------
@@ -95,6 +126,11 @@ function AppContent() {
   // --------------------------------------------------------------------------
   const tagNameById = Object.fromEntries(tags.map((t) => [t.id, t.name]));
 
+  // Open delete modal automatically when a token arrives from the email link
+  useEffect(() => {
+    if (deleteToken) setDeleteAccountOpen(true);
+  }, [deleteToken]);
+
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-950 via-purple-950 to-slate-950">
       <Header
@@ -103,6 +139,7 @@ function AppContent() {
         onImportBookmarks={() => setImportOpen(true)}
         onExportBookmarks={() => setExportOpen(true)}
       />
+      {!emailVerified && <EmailVerificationBanner />}
 
         <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 px-4 md:px-6 lg:px-8 pt-6 md:pt-8 pb-8">
 
@@ -211,7 +248,8 @@ function AppContent() {
 
       <DeleteAccountModal
         open={deleteAccountOpen}
-        onClose={() => setDeleteAccountOpen(false)}
+        onClose={() => { setDeleteAccountOpen(false); clearDeleteToken(); }}
+        initialToken={deleteToken ?? undefined}
       />
 
       <ImportBookmarksModal
