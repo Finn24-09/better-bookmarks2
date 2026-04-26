@@ -221,16 +221,29 @@ GRANT EXECUTE ON FUNCTION auth.mark_email_verified(UUID) TO email_svc;
 -- token_version increment invalidates any live JWTs (H-2 fix).
 -- bookmark_tags is deleted explicitly before bookmarks/tags in case the FK
 -- cascade is not present (H-5 fix).
+--
+-- S-7: This function takes the PLAINTEXT new password and hashes it with
+-- crypt(..., gen_salt('bf', 13)) so the cost factor matches sign_up and
+-- change_password. The email service never holds the bcrypt hash.
+--
+-- Idempotency guard: PostgreSQL refuses to rename input parameters via
+-- CREATE OR REPLACE FUNCTION (`cannot change name of input parameter`). The
+-- S-7 review renamed p_new_pw_hash → p_new_pw, so re-applying this script
+-- against a database that has the older signature would abort the migration.
+-- DROP FUNCTION IF EXISTS makes the migration safe to re-apply regardless of
+-- which prior signature exists.
 -- ---------------------------------------------------------------------------
 
+DROP FUNCTION IF EXISTS auth.reset_password_destroy_data(UUID, TEXT);
+
 CREATE OR REPLACE FUNCTION auth.reset_password_destroy_data(
-  p_user_id     UUID,
-  p_new_pw_hash TEXT
+  p_user_id UUID,
+  p_new_pw  TEXT
 )
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = auth, api
+SET search_path = auth, api, public
 AS $$
 BEGIN
   -- Remove junction rows first to avoid FK violations if cascades differ
@@ -243,10 +256,10 @@ BEGIN
   DELETE FROM api.bookmarks        WHERE user_id = p_user_id;
 
   UPDATE auth.users
-  SET password       = p_new_pw_hash,
+  SET password       = crypt(p_new_pw, gen_salt('bf', 13)),  -- S-7: hash here, cost 13
       key_version    = key_version + 1,
-      token_version  = token_version + 1,  -- invalidates all live JWTs (H-2)
-      email_verified = TRUE                -- reset link proves email ownership
+      token_version  = token_version + 1,                    -- invalidates all live JWTs (H-2)
+      email_verified = TRUE                                  -- reset link proves email ownership
   WHERE id = p_user_id;
 END;
 $$;
@@ -342,14 +355,16 @@ BEGIN
   v_user_id := (v_claims::JSON->>'sub')::UUID;
   IF v_user_id IS NULL THEN RETURN; END IF;
 
-  -- Tokens issued before the tv claim was added: skip (graceful rollout)
+  -- Every JWT this service issues carries a tv claim; absence means a forged or stale-deployment session.
   BEGIN
     v_claim_tv := (v_claims::JSON->>'tv')::INTEGER;
-  EXCEPTION WHEN OTHERS THEN
-    RETURN;
+  EXCEPTION WHEN invalid_text_representation OR invalid_parameter_value THEN
+    RAISE SQLSTATE 'PT401' USING MESSAGE = 'Session requires re-authentication';
   END;
 
-  IF v_claim_tv IS NULL THEN RETURN; END IF;
+  IF v_claim_tv IS NULL THEN
+    RAISE SQLSTATE 'PT401' USING MESSAGE = 'Session requires re-authentication';
+  END IF;
 
   SELECT token_version INTO v_db_tv FROM auth.users WHERE id = v_user_id;
 

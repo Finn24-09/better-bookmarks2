@@ -42,14 +42,12 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./docker/db/tests:/tests:ro
-    entrypoint: []
-    command: >
-      psql
-        -v ON_ERROR_STOP=0
-        -h db
-        -U ${POSTGRES_USER}
-        -d ${POSTGRES_DB}
-        -f /tests/tests.sql
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=0 -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f /tests/migration_state.sql
+        psql -v ON_ERROR_STOP=0 -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f /tests/tests.sql
     profiles:
       - test
     networks:

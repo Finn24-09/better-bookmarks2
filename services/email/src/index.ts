@@ -29,6 +29,13 @@ fastify.setErrorHandler((err, _req, reply) => {
 });
 
 fastify.get('/health', async (_req, reply) => {
+  // N-6: This probes only PostgreSQL connectivity. SMTP reachability is NOT
+  // checked here — the Docker healthcheck can therefore report healthy while
+  // the service is unable to deliver any mail. This is deliberate: running
+  // transporter.verify() on every probe would flood the SMTP relay with
+  // AUTH attempts, and a cached periodic probe adds infrastructure for a
+  // failure mode the upstream alerting (bounce monitoring, send-failure
+  // logging in each route) already covers.
   await pool.query('SELECT 1');
   return reply.status(200).send({ ok: true });
 });

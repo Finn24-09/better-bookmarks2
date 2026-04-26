@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { MailCheck, AlertTriangle } from 'lucide-react';
 import { resendVerificationEmail } from '../../lib/email';
 
-const COOLDOWN_MS = 60_000;
+// Aligned with the server-side cooldown (resendVerification.ts: 10 minutes).
+// A shorter client window would let the user click again before the server
+// allows it, get 429-rejected, and see no feedback (the catch below is
+// intentionally silent because the banner stays visible regardless).
+const COOLDOWN_MS = 10 * 60_000;
 
 export function EmailVerificationBanner() {
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);

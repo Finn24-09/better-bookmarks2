@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { esc } from './escape.js';
 
 export function resetPasswordTemplate(token: string): { subject: string; html: string; text: string } {
   const link = `${config.APP_BASE_URL}/api/email/reset-password?token=${encodeURIComponent(token)}`;
@@ -16,11 +17,11 @@ export function resetPasswordTemplate(token: string): { subject: string; html: s
   const html = `<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto">
 <div style="background:#7c2d12;border:1px solid #9a3412;border-radius:8px;padding:16px;margin-bottom:24px">
 <strong style="color:#fed7aa">⚠️ Data loss warning</strong>
-<p style="color:#fdba74;margin:8px 0 0">${warning}</p>
+<p style="color:#fdba74;margin:8px 0 0">${esc(warning)}</p>
 </div>
 <p>If you still wish to proceed, click the button below. The link expires in <strong>1 hour</strong>.</p>
-<p><a href="${link}" style="display:inline-block;padding:12px 24px;background:#dc2626;color:#fff;text-decoration:none;border-radius:8px">Reset password (deletes all data)</a></p>
-<p style="color:#666;font-size:0.9em">Or copy this link: <a href="${link}">${link}</a></p>
+<p><a href="${esc(link)}" style="display:inline-block;padding:12px 24px;background:#dc2626;color:#fff;text-decoration:none;border-radius:8px">Reset password (deletes all data)</a></p>
+<p style="color:#666;font-size:0.9em">Or copy this link: <a href="${esc(link)}">${esc(link)}</a></p>
 <p style="color:#666;font-size:0.9em">If you did not request a password reset, you can ignore this email — your account is safe.</p>
 </body></html>`;
   return { subject, html, text };

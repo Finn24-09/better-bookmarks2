@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { pool } from '../db.js';
-import { hashToken, TTL } from '../tokens.js';
+import { hashToken, TTL } from '../tokenUtils.js';
 import { config } from '../config.js';
 
 export const resetPasswordRoute: FastifyPluginAsync = async (fastify) => {
@@ -9,6 +9,7 @@ export const resetPasswordRoute: FastifyPluginAsync = async (fastify) => {
   // then redirects to /#reset-password (no token in redirect URL — H-1, H-3).
   fastify.get('/reset-password', async (req, reply) => {
     const token = (req.query as Record<string, string>)['token'] ?? '';
+    // Hash fragment with embedded query string — parsed by App.tsx hash handler. The `?` is part of the fragment, not a real query string.
     if (!token || token.length > 256) {
       return reply.redirect(`${config.APP_BASE_URL}/#reset-password?error=invalid`);
     }

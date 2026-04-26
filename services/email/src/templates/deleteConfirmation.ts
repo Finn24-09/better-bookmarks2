@@ -1,3 +1,5 @@
+import { esc } from './escape.js';
+
 export function deleteConfirmationTemplate(token: string): { subject: string; html: string; text: string } {
   const subject = 'Confirm your Better Bookmarks account deletion';
   const text = [
@@ -17,7 +19,7 @@ export function deleteConfirmationTemplate(token: string): { subject: string; ht
 <p>Copy the token below and paste it into the deletion confirmation dialog. The token expires in <strong>15 minutes</strong>. You will also need to enter your password.</p>
 <div style="margin:24px 0;padding:16px 20px;background:#1e1e2e;border:1px solid #374151;border-radius:8px">
   <p style="margin:0 0 8px;color:#9ca3af;font-size:0.85em">Your deletion token — copy this:</p>
-  <code style="display:block;color:#f9fafb;font-size:1em;word-break:break-all;letter-spacing:0.05em">${token}</code>
+  <code style="display:block;color:#f9fafb;font-size:1em;word-break:break-all;letter-spacing:0.05em">${esc(token)}</code>
 </div>
 <p style="color:#666;font-size:0.9em">If you did not request account deletion, you can ignore this email — your account is safe.</p>
 </body></html>`;

@@ -1,12 +1,15 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import bcrypt from 'bcryptjs';
 import { pool } from '../db.js';
-import { hashToken } from '../tokens.js';
+import { hashToken } from '../tokenUtils.js';
 import { config } from '../config.js';
 
+// S-7: Hashing happens inside auth.reset_password_destroy_data via
+// crypt(p_new_pw, gen_salt('bf', 13)) so all account hashes share the
+// same cost factor as sign_up and change_password. The Node service
+// never sees a bcrypt hash; bcryptjs has been removed as a dependency.
 const bodySchema = z.object({
-  new_password: z.string().min(8).max(128),
+  new_password: z.string().min(12).max(128),
 });
 
 export const confirmResetRoute: FastifyPluginAsync = async (fastify) => {
@@ -22,7 +25,7 @@ export const confirmResetRoute: FastifyPluginAsync = async (fastify) => {
     }
 
     const tokenHash = hashToken(cookieToken);
-    const pwHash = await bcrypt.hash(parsed.data.new_password, 12);
+    const newPassword = parsed.data.new_password;
 
     const client = await pool.connect();
     try {
@@ -39,10 +42,11 @@ export const confirmResetRoute: FastifyPluginAsync = async (fastify) => {
       }
 
       const userId = redeemResult.rows[0].user_id;
-      await client.query('SELECT auth.reset_password_destroy_data($1, $2)', [userId, pwHash]);
+      // S-7: pass plaintext to the SQL function — it hashes with gen_salt('bf', 13).
+      await client.query('SELECT auth.reset_password_destroy_data($1, $2)', [userId, newPassword]);
       await client.query('COMMIT');
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       req.log.error({ err }, 'confirmReset: transaction failed');
       return reply.status(500).send({ error: 'Internal error' });
     } finally {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { X, Mail, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 import { requestPasswordReset } from '../../lib/email';
 
 interface Props {
@@ -24,8 +25,18 @@ export function ForgotPasswordModal({ onClose }: Props) {
 
   const onSubmit = async (data: FormFields) => {
     setState('submitting');
-    await requestPasswordReset(data.email);
-    setState('done');
+    try {
+      await requestPasswordReset(data.email);
+      setState('done');
+    } catch {
+      // Network failures must not strand the modal in 'submitting'.
+      // Use a generic message — never relay the underlying error to avoid
+      // leaking transport / schema details (matches the api.ts sanitization
+      // pattern). The route always returns 200 on success, so any throw here
+      // is a transport-layer failure the user can retry.
+      toast.error('Could not send the reset link. Please try again.');
+      setState('idle');
+    }
   };
 
   return (

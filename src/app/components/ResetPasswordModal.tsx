@@ -75,7 +75,7 @@ export function ResetPasswordModal({ onClose }: Props) {
               className="w-full pl-11 pr-11 py-3 bg-white/5 border border-white/10 rounded-2xl text-white placeholder:text-white/40 focus:outline-none focus:bg-white/10 focus:border-white/20 transition-all duration-300"
               {...register('new_password', {
                 required: 'Password is required',
-                minLength: { value: 8, message: 'At least 8 characters' },
+                minLength: { value: 12, message: 'At least 12 characters' },
               })}
             />
             <button type="button" tabIndex={-1} onClick={() => setShowPw(s => !s)} className={`absolute right-3 top-1/2 -translate-y-1/2 ${eyeBtn}`}>

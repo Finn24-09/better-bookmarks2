@@ -107,12 +107,18 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
       // Re-encrypt tag names (name_hmac is keyed on userId, not password — unchanged).
       await Promise.all(allTags.map((tag) => reencryptTag(tag.id, tag.name, newKey, targetVersion)));
 
+      // Notify by email BEFORE the password change — at this point the JWT
+      // is unambiguously valid (token_version not yet incremented, in-memory
+      // token not yet cleared by logout()). Calling it after changePassword
+      // races logout() on the event loop and risks a 401 on the email service.
+      // Fire-and-forget: the email is best-effort and must not block rotation.
+      notifyPasswordChanged();
+
       // Only update the DB password after all re-encryption succeeds.
       // changePassword increments token_version, which immediately invalidates
       // the current JWT — logout and redirect so the user gets a fresh session.
       await changePassword(data.currentPassword, data.newPassword);
 
-      notifyPasswordChanged(); // fire-and-forget; still valid before logout clears the token
       logout();
       navigate('/login', { replace: true });
       toast.success("Password updated — please sign in with your new password.");

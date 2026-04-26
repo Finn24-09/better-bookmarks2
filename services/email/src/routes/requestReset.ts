@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { pool } from '../db.js';
-import { generateToken, hashToken, TTL } from '../tokens.js';
+import { generateToken, hashToken, TTL } from '../tokenUtils.js';
 import { sendMail } from '../mailer.js';
 import { resetPasswordTemplate } from '../templates/resetPassword.js';
 

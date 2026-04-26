@@ -46,7 +46,6 @@ export async function apiFetch<T = unknown>(
       '/rpc/sign_in',
       '/rpc/sign_up',
       '/rpc/change_password',
-      '/rpc/delete_account',
     ];
     const isAuthRpc = AUTH_RPC_PATHS.some((p) => path.startsWith(p));
 

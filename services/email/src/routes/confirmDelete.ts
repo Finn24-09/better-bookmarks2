@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { pool } from '../db.js';
-import { hashToken } from '../tokens.js';
+import { hashToken } from '../tokenUtils.js';
 import { verifyJwt } from '../jwt.js';
 
 const bodySchema = z.object({
@@ -24,12 +24,15 @@ export const confirmDeleteRoute: FastifyPluginAsync = async (fastify) => {
     const { token, password } = parsed.data;
     const tokenHash = hashToken(token);
 
-    // Phase 1: Redeem token atomically and commit immediately.
-    // Permanently consuming the token on first valid redemption prevents brute-forcing
-    // the password against a valid token across the 15-minute TTL window.
+    // M-1: Redeem token AND verify password in a single transaction.
+    // If the password is wrong we ROLLBACK so the token row stays unused —
+    // an attacker who intercepts a valid token cannot lock the legitimate
+    // user out by consuming it with a wrong password.
+    // Brute-force is still bounded by the Nginx rate limit and the 15-minute TTL.
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
       const redeemResult = await client.query<{ user_id: string }>(
         `SELECT user_id FROM auth.redeem_email_token($1, 'delete_confirmation')`,
         [tokenHash],
@@ -38,30 +41,26 @@ export const confirmDeleteRoute: FastifyPluginAsync = async (fastify) => {
         await client.query('ROLLBACK');
         return reply.status(400).send({ error: 'Invalid or expired token' });
       }
-      await client.query('COMMIT'); // token permanently consumed
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      req.log.error({ err }, 'confirmDelete: redeem failed');
-      return reply.status(500).send({ error: 'Internal error' });
-    } finally {
-      client.release();
-    }
 
-    // Phase 2: Verify password + delete account.
-    // email_svc has no direct DELETE on auth.users — the SECURITY DEFINER function
-    // handles both bcrypt verification and cascading deletion atomically.
-    // Token is already consumed; wrong password here requires requesting a new email.
-    try {
-      const { rows } = await pool.query<{ delete_account_with_password: boolean }>(
+      // Password verification inside the same transaction.
+      // email_svc has no direct DELETE on auth.users — the SECURITY DEFINER
+      // function handles bcrypt verification and cascading deletion atomically.
+      const deleteResult = await client.query<{ delete_account_with_password: boolean }>(
         'SELECT auth.delete_account_with_password($1::uuid, $2)',
         [userId, password],
       );
-      if (!rows[0].delete_account_with_password) {
+      if (!deleteResult.rows[0].delete_account_with_password) {
+        await client.query('ROLLBACK'); // token NOT consumed on wrong password
         return reply.status(400).send({ error: 'Invalid password' });
       }
+
+      await client.query('COMMIT');
     } catch (err) {
-      req.log.error({ err }, 'confirmDelete: delete failed');
+      await client.query('ROLLBACK').catch(() => {});
+      req.log.error({ err }, 'confirmDelete: transaction failed');
       return reply.status(500).send({ error: 'Internal error' });
+    } finally {
+      client.release();
     }
 
     // Fire-and-forget audit log — failure must not block the success response.

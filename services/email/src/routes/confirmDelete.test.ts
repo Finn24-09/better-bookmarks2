@@ -40,10 +40,13 @@ function makeApp() {
 // ── helpers ────────────────────────────────────────────────────────────────
 
 function setupRedeemSuccess(userId = VALID_USER) {
+  // M-1: BEGIN → redeem → delete_account_with_password (TRUE) → COMMIT,
+  // all via client.query (single transaction).
   mockQuery
-    .mockResolvedValueOnce({ rows: [] })                               // BEGIN
-    .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: userId }] }) // redeem
-    .mockResolvedValueOnce({ rows: [] });                              // COMMIT
+    .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+    .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: userId }] })           // redeem
+    .mockResolvedValueOnce({ rows: [{ delete_account_with_password: true }] })    // delete (correct pw)
+    .mockResolvedValueOnce({ rows: [] });                                          // COMMIT
 }
 
 function setupRedeemEmpty() {
@@ -64,8 +67,8 @@ describe('POST /confirm-delete', () => {
   // TC-1 ──────────────────────────────────────────────────────────────────
   it('TC-1: valid token + correct password → 200 { ok: true }', async () => {
     setupRedeemSuccess();
-    // pool.query used for delete + audit log insert
-    mockPoolQuery.mockResolvedValue({ rows: [{ delete_account_with_password: true }] });
+    // pool.query is used only for the audit-log INSERT after the tx commits.
+    mockPoolQuery.mockResolvedValue({ rows: [] });
 
     const res = await makeApp().inject({
       method: 'POST',
@@ -79,14 +82,25 @@ describe('POST /confirm-delete', () => {
     const sql = mockQuery.mock.calls.map((c) => String(c[0]));
     expect(sql.some(s => s.includes('COMMIT'))).toBe(true);
     expect(sql.some(s => s.includes('ROLLBACK'))).toBe(false);
+    // M-1: delete_account_with_password runs via the transaction client.
+    expect(sql.some(s => s.includes('delete_account_with_password'))).toBe(true);
     expect(mockRelease).toHaveBeenCalledOnce();
-    expect(mockPoolQuery).toHaveBeenCalled(); // delete + audit log
+    // pool.query is only used for the audit log; never for the delete itself.
+    expect(mockPoolQuery).toHaveBeenCalledOnce();
+    expect(String(mockPoolQuery.mock.calls[0][0])).toMatch(/security_audit_log/);
   });
 
   // TC-2 ──────────────────────────────────────────────────────────────────
-  it('TC-2: valid token + wrong password → 400 "Invalid password", token committed (consumed)', async () => {
-    setupRedeemSuccess();
-    mockPoolQuery.mockResolvedValueOnce({ rows: [{ delete_account_with_password: false }] });
+  // M-1: After moving password verification into the same transaction as
+  // token redemption, a wrong password must ROLLBACK (not COMMIT) — so the
+  // token row stays unused and the legitimate user can retry with it.
+  it('TC-2 (M-1): valid token + wrong password → 400 "Invalid password", redemption ROLLED BACK (token NOT consumed)', async () => {
+    // Sequence: BEGIN → redeem → delete_account (returns false) → ROLLBACK
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // redeem
+      .mockResolvedValueOnce({ rows: [{ delete_account_with_password: false }] })   // wrong password
+      .mockResolvedValueOnce({ rows: [] });                                          // ROLLBACK
 
     const res = await makeApp().inject({
       method: 'POST',
@@ -98,10 +112,57 @@ describe('POST /confirm-delete', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'Invalid password' });
     const sql = mockQuery.mock.calls.map((c) => String(c[0]));
-    // Token was COMMITTED (permanently consumed) even though password was wrong
-    expect(sql.some(s => s.includes('COMMIT'))).toBe(true);
-    expect(sql.some(s => s.includes('ROLLBACK'))).toBe(false);
+    // M-1: Token redemption is ROLLED BACK on wrong password — UPDATE used_at
+    // never commits, so the token can be reused by the legitimate owner.
+    expect(sql.some(s => s.includes('ROLLBACK'))).toBe(true);
+    expect(sql.some(s => s.includes('COMMIT'))).toBe(false);
+    // Password verification ran on the SAME client, not via pool.query.
+    expect(mockPoolQuery).not.toHaveBeenCalled();
+    expect(sql.some(s => s.includes('delete_account_with_password'))).toBe(true);
     expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  // TC-2b (M-1) ─────────────────────────────────────────────────────────────
+  // The legitimate user can RETRY with the same token after a wrong-password
+  // attempt, because the redemption was rolled back. Simulated by issuing two
+  // requests with the same token: first wrong, second correct.
+  it('TC-2b (M-1): same token usable after a wrong-password attempt', async () => {
+    const app = makeApp();
+
+    // Attempt 1 — wrong password, token NOT consumed (ROLLBACK).
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // redeem
+      .mockResolvedValueOnce({ rows: [{ delete_account_with_password: false }] })   // wrong password
+      .mockResolvedValueOnce({ rows: [] });                                          // ROLLBACK
+
+    const res1 = await app.inject({
+      method: 'POST',
+      url: '/confirm-delete',
+      headers: { authorization: `Bearer ${await makeToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'shared-token', password: 'WrongPass1!' }),
+    });
+    expect(res1.statusCode).toBe(400);
+
+    // Attempt 2 — correct password using the SAME token. Because the previous
+    // redemption was rolled back, redeem returns the user_id again and we COMMIT.
+    vi.clearAllMocks();
+    mockConnect.mockResolvedValue({ query: mockQuery, release: mockRelease });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // redeem
+      .mockResolvedValueOnce({ rows: [{ delete_account_with_password: true }] })    // correct
+      .mockResolvedValueOnce({ rows: [] });                                          // COMMIT
+
+    const res2 = await app.inject({
+      method: 'POST',
+      url: '/confirm-delete',
+      headers: { authorization: `Bearer ${await makeToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'shared-token', password: 'CorrectPass1!' }),
+    });
+
+    expect(res2.statusCode).toBe(200);
+    expect(res2.json()).toEqual({ ok: true });
   });
 
   // TC-3 ──────────────────────────────────────────────────────────────────

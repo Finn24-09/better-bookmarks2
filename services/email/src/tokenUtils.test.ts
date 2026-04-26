@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateToken, hashToken } from './tokens.js';
+import { generateToken, hashToken } from './tokenUtils.js';
 
 describe('generateToken', () => {
   it('returns a string of at least 40 characters (base64url of 32 bytes)', () => {

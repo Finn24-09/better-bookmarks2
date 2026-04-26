@@ -57,6 +57,8 @@ vi.mock('../../lib/email', () => ({
   notifyPasswordChanged: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { notifyPasswordChanged } from '../../lib/email';
+
 // Suppress toast calls in tests (no Toaster rendered)
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -300,6 +302,62 @@ describe('ChangePasswordModal', () => {
     await waitFor(() => {
       expect(calls).toEqual(['reencrypt', 'changePassword']);
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // N-3: notifyPasswordChanged() must run while the JWT is unambiguously
+  // valid. Calling it AFTER changePassword() races logout() (which clears
+  // the in-memory token) and risks a 401. Move it BEFORE changePassword.
+  // -------------------------------------------------------------------------
+  it('calls notifyPasswordChanged BEFORE changePassword (token is still valid pre-rotation)', async () => {
+    const calls: string[] = [];
+    vi.mocked(deriveKey).mockResolvedValue({} as CryptoKey);
+    vi.mocked(notifyPasswordChanged).mockImplementation(async () => {
+      calls.push('notify');
+    });
+    vi.mocked(changePassword).mockImplementation(async () => {
+      calls.push('changePassword');
+      return undefined as never;
+    });
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
+    await user.click(screen.getByRole('button', { name: /save password/i }));
+
+    await waitFor(() => {
+      expect(calls).toContain('notify');
+      expect(calls).toContain('changePassword');
+    });
+    // Ordering: notify runs before changePassword — token is unambiguously valid.
+    expect(calls.indexOf('notify')).toBeLessThan(calls.indexOf('changePassword'));
+  });
+
+  it('calls notifyPasswordChanged BEFORE logout (so getToken() still returns the JWT)', async () => {
+    const calls: string[] = [];
+    vi.mocked(deriveKey).mockResolvedValue({} as CryptoKey);
+    vi.mocked(changePassword).mockResolvedValue(undefined as never);
+    vi.mocked(notifyPasswordChanged).mockImplementation(async () => {
+      calls.push('notify');
+    });
+    mockLogout.mockImplementation(() => {
+      calls.push('logout');
+    });
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
+    await user.click(screen.getByRole('button', { name: /save password/i }));
+
+    await waitFor(() => {
+      expect(calls).toContain('notify');
+      expect(calls).toContain('logout');
+    });
+    expect(calls.indexOf('notify')).toBeLessThan(calls.indexOf('logout'));
   });
 
   // -------------------------------------------------------------------------

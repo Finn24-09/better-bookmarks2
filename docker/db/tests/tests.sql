@@ -37,12 +37,12 @@ $$;
 -- ===========================================================================
 
 SELECT ok(
-  (SELECT r->>'token' IS NOT NULL FROM (SELECT api.sign_up('alice@test.com', 'password123') r) t),
+  (SELECT r->>'token' IS NOT NULL FROM (SELECT api.sign_up('alice@test.com', 'Password1234') r) t),
   'sign_up: returns a non-null token'
 );
 
 SELECT ok(
-  (SELECT r->>'user_id' IS NOT NULL FROM (SELECT api.sign_up('bob@test.com', 'password123') r) t),
+  (SELECT r->>'user_id' IS NOT NULL FROM (SELECT api.sign_up('bob@test.com', 'Password1234') r) t),
   'sign_up: returns a non-null user_id'
 );
 
@@ -50,7 +50,7 @@ SELECT ok(
 -- Two separate statements — avoids the volatile-function-in-WHERE-clause
 -- issue where PostgreSQL would call sign_up once per existing row.
 SELECT ok(
-  (SELECT r->>'user_id' IS NOT NULL FROM (SELECT api.sign_up('CAROL@TEST.COM', 'password123') r) t),
+  (SELECT r->>'user_id' IS NOT NULL FROM (SELECT api.sign_up('CAROL@TEST.COM', 'Password1234') r) t),
   'sign_up: CAROL@TEST.COM accepted'
 );
 SELECT ok(
@@ -59,14 +59,14 @@ SELECT ok(
 );
 
 SELECT _expect_error(
-  $q$ SELECT api.sign_up('alice@test.com', 'duplicate') $q$,
-  'Email already registered',
-  'sign_up: duplicate email raises error'
+  $q$ SELECT api.sign_up('alice@test.com', 'Duplicate1234') $q$,
+  'Registration failed. Please try again.',
+  'sign_up: duplicate email raises sanitised error (no enumeration)'
 );
 
 SELECT _expect_error(
   $q$ SELECT api.sign_up('x@test.com', 'abc') $q$,
-  'Password must be at least 8 characters',
+  'Password must be at least 12 characters',
   'sign_up: password too short raises error'
 );
 
@@ -75,7 +75,7 @@ SELECT _expect_error(
 -- ===========================================================================
 
 SELECT ok(
-  (SELECT r->>'token' IS NOT NULL FROM (SELECT api.sign_in('alice@test.com', 'password123') r) t),
+  (SELECT r->>'token' IS NOT NULL FROM (SELECT api.sign_in('alice@test.com', 'Password1234') r) t),
   'sign_in: correct credentials return a token'
 );
 
@@ -86,7 +86,7 @@ SELECT _expect_error(
 );
 
 SELECT _expect_error(
-  $q$ SELECT api.sign_in('nobody@test.com', 'password123') $q$,
+  $q$ SELECT api.sign_in('nobody@test.com', 'Password1234') $q$,
   'Invalid email or password',
   'sign_in: unknown email raises same error (no enumeration)'
 );
@@ -159,23 +159,16 @@ SELECT _expect_error(
 );
 
 -- ===========================================================================
--- delete_account: verify cascade to bookmarks and tags
--- Use three separate statements (same transaction) to guarantee ordering:
--- set session → call delete → verify. Avoids CTE lazy-evaluation issues.
+-- user deletion: verify FK cascade to bookmarks and tags.
+-- The application-level password-confirmed delete is exercised in the email
+-- service's confirmDelete.test.ts; here we verify the schema invariant only.
 -- ===========================================================================
 
--- 1. Set Carol's session JWT claims
-SELECT set_config('request.jwt.claims',
-  json_build_object('sub', (SELECT id::TEXT FROM auth.users WHERE email = 'carol@test.com'),
-                    'role', 'app_user')::TEXT, true);
+DELETE FROM auth.users WHERE email = 'carol@test.com';
 
--- 2. Delete Carol's account (password123 was used during sign_up in test 3)
-SELECT api.delete_account('password123');
-
--- 3. Verify carol no longer exists
 SELECT ok(
   NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'carol@test.com'),
-  'delete_account: removes user and cascades to all data'
+  'cascade: deleting auth.users row removes user and cascades to all data'
 );
 
 -- ===========================================================================
@@ -252,15 +245,7 @@ SELECT _expect_error(
 );
 
 -- --- Test 21: Deleting Alice's account cascades to thumbnail_images ---
--- Alice's account and thumbnail image were inserted above; delete_account
--- removes her from auth.users, which cascades to thumbnail_images.
-SELECT set_config('request.jwt.claims',
-  json_build_object(
-    'sub',  (SELECT id::TEXT FROM auth.users WHERE email = 'alice@test.com'),
-    'role', 'app_user'
-  )::TEXT, true);
-
-SELECT api.delete_account('password123');
+DELETE FROM auth.users WHERE email = 'alice@test.com';
 
 SELECT ok(
   NOT EXISTS (

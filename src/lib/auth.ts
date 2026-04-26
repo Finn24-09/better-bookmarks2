@@ -30,13 +30,6 @@ export function changePassword(
   });
 }
 
-export function deleteAccount(password: string): Promise<void> {
-  return apiFetch<void>('/rpc/delete_account', {
-    method: 'POST',
-    body: JSON.stringify({ password }),
-  });
-}
-
 export interface RotationStatus {
   keyVersion: number;
   hasStaleRecords: boolean;

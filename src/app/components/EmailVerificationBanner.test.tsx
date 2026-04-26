@@ -49,4 +49,23 @@ describe('EmailVerificationBanner', () => {
       expect(screen.getByRole('button', { name: /resend in/i })).toBeDisabled();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // N-2: Client cooldown must match the server cooldown (10 min). Otherwise
+  // the user clicks at 60 s, the server immediately 429s, and the empty
+  // catch block hides the failure. Aligning to 10 min avoids the race entirely.
+  // -------------------------------------------------------------------------
+  it('cooldown countdown shows ~10 minutes (>60 s) immediately after a successful send', async () => {
+    render(<EmailVerificationBanner />);
+    fireEvent.click(screen.getByRole('button', { name: /resend email/i }));
+
+    const cooldownBtn = await screen.findByRole('button', { name: /resend in/i });
+    const label = cooldownBtn.textContent ?? '';
+    const match = label.match(/(\d+)/);
+    expect(match).not.toBeNull();
+    const seconds = Number(match![1]);
+    // 60 s cooldown would yield exactly 60 here. 10-min cooldown yields ~600.
+    // Any value > 60 proves the constant is no longer 60_000.
+    expect(seconds).toBeGreaterThan(60);
+  });
 });
