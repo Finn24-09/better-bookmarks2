@@ -23,7 +23,9 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   if (isLoading) return null;
 
   if (!token || !cryptoKey) {
-    return <Navigate to="/login" replace />;
+    // Preserve hash fragment so reset-password link survives the redirect to login
+    const hash = window.location.hash;
+    return <Navigate to={`/login${hash}`} replace />;
   }
 
   return <Fragment key={userId}>{children}</Fragment>;

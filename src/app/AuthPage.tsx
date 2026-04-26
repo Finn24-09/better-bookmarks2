@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useForm } from "react-hook-form";
 import { motion, AnimatePresence } from "motion/react";
-import { Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { FloatingFooter } from "./components/FloatingFooter";
 import { PasswordStrengthHints } from "./components/PasswordStrengthHints";
+import { ForgotPasswordModal } from "./components/ForgotPasswordModal";
+import { ResetPasswordModal } from "./components/ResetPasswordModal";
 import { cn } from "./components/ui/utils";
 import { signIn, signUp } from "../lib/auth";
 import { deriveKey } from "../lib/crypto";
@@ -94,6 +96,7 @@ interface RegisterFields {
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   const {
     register,
@@ -105,7 +108,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     try {
       const result = await signIn(data.email, data.password);
       const cryptoKey = await deriveKey(data.password, data.email);
-      login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
+      await login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey, result.email_verified);
       onSuccess();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Incorrect email or password");
@@ -113,40 +116,46 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
-      <InputField
-        type="email"
-        placeholder="Email address"
-        icon={Mail}
-        autoComplete="email"
-        error={errors.email?.message}
-        {...register("email", { required: "Email is required" })}
-      />
-      <div className="space-y-1">
+    <>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
         <InputField
-          type={showPassword ? "text" : "password"}
-          placeholder="Password"
-          icon={Lock}
-          autoComplete="current-password"
-          error={errors.password?.message}
-          rightSlot={
-            <EyeToggle show={showPassword} onToggle={() => setShowPassword((s) => !s)} />
-          }
-          {...register("password", { required: "Password is required" })}
+          type="email"
+          placeholder="Email address"
+          icon={Mail}
+          autoComplete="email"
+          error={errors.email?.message}
+          {...register("email", { required: "Email is required" })}
         />
-        <div className="flex justify-end">
-          <button
-            type="button"
-            className="text-xs text-white/40 hover:text-white/70 transition-colors duration-300"
-          >
-            Forgot password?
-          </button>
+        <div className="space-y-1">
+          <InputField
+            type={showPassword ? "text" : "password"}
+            placeholder="Password"
+            icon={Lock}
+            autoComplete="current-password"
+            error={errors.password?.message}
+            rightSlot={
+              <EyeToggle show={showPassword} onToggle={() => setShowPassword((s) => !s)} />
+            }
+            {...register("password", { required: "Password is required" })}
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              className="text-xs text-white/40 hover:text-white/70 transition-colors duration-300"
+            >
+              Forgot password?
+            </button>
+          </div>
         </div>
-      </div>
-      <button type="submit" disabled={isSubmitting} className={primaryBtn}>
-        {isSubmitting ? "Signing in…" : "Sign In"}
-      </button>
-    </form>
+        <button type="submit" disabled={isSubmitting} className={primaryBtn}>
+          {isSubmitting ? "Signing in…" : "Sign In"}
+        </button>
+      </form>
+      {showForgotPassword && (
+        <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />
+      )}
+    </>
   );
 }
 
@@ -172,7 +181,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
     try {
       const result = await signUp(data.email, data.password);
       const cryptoKey = await deriveKey(data.password, data.email);
-      login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey);
+      await login(result.token, result.user_id, data.email.toLowerCase(), cryptoKey, result.email_verified, true);
       onSuccess();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not create account. Try again.");
@@ -181,6 +190,15 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+      {/* Data-loss warning — always visible, non-dismissible */}
+      <div className="flex gap-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-xs text-amber-300/90 leading-relaxed">
+          <strong className="text-amber-300">Remember your password.</strong> Your bookmarks are
+          encrypted with a key derived from it. If you forget it, a password reset will permanently
+          delete all your bookmarks and tags — this cannot be undone.
+        </p>
+      </div>
       <InputField
         type="email"
         placeholder="Email address"
@@ -240,6 +258,14 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
 export function AuthPage() {
   const navigate = useNavigate();
   const [isLogin, setIsLogin] = useState(true);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+
+  useEffect(() => {
+    if (window.location.hash === '#reset-password') {
+      setShowResetPassword(true);
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
 
   const handleSuccess = () => navigate("/");
 
@@ -430,6 +456,10 @@ export function AuthPage() {
       </div>
 
       <FloatingFooter />
+
+      {showResetPassword && (
+        <ResetPasswordModal onClose={() => setShowResetPassword(false)} />
+      )}
     </div>
   );
 }
