@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { DeleteAccountModal } from './DeleteAccountModal';
@@ -19,165 +19,141 @@ vi.mock('react-router', async (importOriginal) => {
   return { ...mod, useNavigate: () => mockNavigate };
 });
 
-vi.mock('../../lib/auth', () => ({
-  deleteAccount: vi.fn(),
+vi.mock('../../lib/email', () => ({
+  requestAccountDeletion: vi.fn().mockResolvedValue(undefined),
+  confirmAccountDeletion: vi.fn().mockResolvedValue({ ok: true }),
 }));
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-import { deleteAccount } from '../../lib/auth';
+import { requestAccountDeletion, confirmAccountDeletion } from '../../lib/email';
 import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
 
-const HOLD_MS = 3000;
+function renderModal(props: { open?: boolean; onClose?: () => void; initialToken?: string } = {}) {
+  const onClose = props.onClose ?? vi.fn();
+  return {
+    onClose,
+    ...render(
+      <MemoryRouter>
+        <DeleteAccountModal open={props.open ?? true} onClose={onClose} initialToken={props.initialToken} />
+      </MemoryRouter>,
+    ),
+  };
+}
+
+/**
+ * Simulate a full 3-second hold on the delete button.
+ * Uses faked setInterval/Date but keeps setTimeout real so waitFor still works.
+ */
+async function holdDeleteButton() {
+  const btn = screen.getByRole('button', { name: /hold to delete/i });
+  fireEvent.mouseDown(btn);
+  await act(async () => {
+    vi.advanceTimersByTime(3100);
+  });
+  fireEvent.mouseUp(btn);
+}
 
 describe('DeleteAccountModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    // Ensure real timers are restored even if a test throws.
-    vi.useRealTimers();
-  });
-
-  function renderModal(open = true, onClose = vi.fn()) {
-    return {
-      onClose,
-      ...render(
-        <MemoryRouter>
-          <DeleteAccountModal open={open} onClose={onClose} />
-        </MemoryRouter>,
-      ),
-    };
-  }
-
-  it('renders heading, warning text, password field, and hold button', () => {
+  it('renders step 1: heading, warning, and send email button', () => {
     renderModal();
     expect(screen.getByText('Delete Account')).toBeInTheDocument();
     expect(screen.getByText(/are you absolutely sure/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/enter your password/i)).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: /hold to permanently delete/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send confirmation email/i })).toBeInTheDocument();
   });
 
   it('clicking Cancel calls onClose', async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
-    render(
-      <MemoryRouter>
-        <DeleteAccountModal open={true} onClose={onClose} />
-      </MemoryRouter>,
-    );
+    renderModal({ onClose });
     await user.click(screen.getByRole('button', { name: /^cancel$/i }));
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('holding without a password shows error after 3 s; deleteAccount not called', async () => {
-    vi.useFakeTimers();
+  it('sends email and advances to step 2', async () => {
+    const user = userEvent.setup();
     renderModal();
-
-    const holdButton = screen.getByRole('button', { name: /hold to permanently delete/i });
-    fireEvent.mouseDown(holdButton);
-
-    await act(async () => {
-      await vi.runAllTimersAsync();
+    await user.click(screen.getByRole('button', { name: /send confirmation email/i }));
+    await waitFor(() => {
+      expect(requestAccountDeletion).toHaveBeenCalledTimes(1);
+      // Step 2 is visible: the hold button appears
+      expect(screen.getByRole('button', { name: /hold to delete/i })).toBeInTheDocument();
     });
-
-    expect(toast.error).toHaveBeenCalledWith('Please enter your password to confirm deletion');
-    expect(deleteAccount).not.toHaveBeenCalled();
-
-    fireEvent.mouseUp(holdButton);
   });
 
-  it('holding with a password calls deleteAccount with that password', async () => {
-    vi.useFakeTimers();
-    vi.mocked(deleteAccount).mockImplementation(() => Promise.resolve());
-    renderModal();
+  it('shows step 2 immediately when initialToken is provided', () => {
+    renderModal({ initialToken: 'preloaded-token' });
+    // Label for the token input is present
+    expect(screen.getByLabelText(/confirmation token/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('preloaded-token')).toBeInTheDocument();
+  });
 
-    await act(async () => {
-      fireEvent.change(screen.getByPlaceholderText(/enter your password/i), {
-        target: { value: 'mypassword' },
+  describe('hold-to-confirm delete button', () => {
+    beforeEach(() => {
+      // Only fake setInterval and Date so waitFor (which uses setTimeout) still works.
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('calls confirmAccountDeletion with token and password after 3-second hold', async () => {
+      renderModal({ initialToken: 'tok123' });
+
+      fireEvent.change(screen.getByPlaceholderText(/paste token/i), { target: { value: 'tok123' } });
+      fireEvent.change(screen.getByPlaceholderText(/enter your password/i), { target: { value: 'MyPass!' } });
+
+      await holdDeleteButton();
+
+      await waitFor(() => {
+        expect(confirmAccountDeletion).toHaveBeenCalledWith('tok123', 'MyPass!');
       });
     });
 
-    const holdButton = screen.getByRole('button', { name: /hold to permanently delete/i });
-    fireEvent.mouseDown(holdButton);
+    it('calls logout and navigates to /login on successful deletion', async () => {
+      renderModal({ initialToken: 'tok' });
+      fireEvent.change(screen.getByPlaceholderText(/enter your password/i), { target: { value: 'pw' } });
 
-    await act(async () => {
-      await vi.runAllTimersAsync();
+      await holdDeleteButton();
+
+      await waitFor(() => {
+        expect(mockLogout).toHaveBeenCalled();
+        expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true });
+      });
     });
 
-    expect(deleteAccount).toHaveBeenCalledWith('mypassword');
-  });
+    it('shows error toast when confirmAccountDeletion fails', async () => {
+      vi.mocked(confirmAccountDeletion).mockResolvedValueOnce({ ok: false, error: 'Invalid password' });
+      renderModal({ initialToken: 'tok' });
+      fireEvent.change(screen.getByPlaceholderText(/enter your password/i), { target: { value: 'wrong' } });
 
-  it('successful deletion calls logout and navigates to /login', async () => {
-    vi.useFakeTimers();
-    vi.mocked(deleteAccount).mockImplementation(() => Promise.resolve());
-    renderModal();
+      await holdDeleteButton();
 
-    fireEvent.change(screen.getByPlaceholderText(/enter your password/i), {
-      target: { value: 'mypassword' },
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Invalid password');
+      });
     });
 
-    const holdButton = screen.getByRole('button', { name: /hold to permanently delete/i });
-    fireEvent.mouseDown(holdButton);
+    it('does not delete if hold is released early', async () => {
+      renderModal({ initialToken: 'tok' });
+      fireEvent.change(screen.getByPlaceholderText(/enter your password/i), { target: { value: 'pw' } });
 
-    await act(async () => {
-      await vi.runAllTimersAsync();
+      const btn = screen.getByRole('button', { name: /hold to delete/i });
+      fireEvent.mouseDown(btn);
+      await act(async () => { vi.advanceTimersByTime(1000); });
+      fireEvent.mouseUp(btn);
+
+      await act(async () => { vi.advanceTimersByTime(3000); });
+
+      expect(confirmAccountDeletion).not.toHaveBeenCalled();
     });
-
-    expect(mockLogout).toHaveBeenCalled();
-    expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true });
-  });
-
-  it('shows a toast error when deleteAccount rejects', async () => {
-    vi.useFakeTimers();
-    vi.mocked(deleteAccount).mockRejectedValue(new Error('Invalid credentials'));
-    renderModal();
-
-    fireEvent.change(screen.getByPlaceholderText(/enter your password/i), {
-      target: { value: 'wrongpass' },
-    });
-
-    const holdButton = screen.getByRole('button', { name: /hold to permanently delete/i });
-    fireEvent.mouseDown(holdButton);
-
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    expect(toast.error).toHaveBeenCalledWith('Invalid credentials');
-  });
-
-  it('button shows "Deleting\u2026" while the deletion is in progress', async () => {
-    vi.useFakeTimers();
-    let resolveFn!: () => void;
-    vi.mocked(deleteAccount).mockImplementation(
-      () => new Promise<void>((res) => { resolveFn = res; }),
-    );
-    renderModal();
-
-    fireEvent.change(screen.getByPlaceholderText(/enter your password/i), {
-      target: { value: 'mypassword' },
-    });
-
-    const holdButton = screen.getByRole('button', { name: /hold to permanently delete/i });
-    fireEvent.mouseDown(holdButton);
-
-    await act(async () => {
-      vi.advanceTimersByTime(HOLD_MS);
-      // Flush the microtasks that run up to (but not past) the pending promise.
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(screen.getByRole('button', { name: /deleting/i })).toBeInTheDocument();
-
-    resolveFn();
   });
 });
