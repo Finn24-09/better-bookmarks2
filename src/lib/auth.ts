@@ -3,6 +3,7 @@ import { apiFetch } from './api';
 export interface AuthResult {
   token: string;
   user_id: string;
+  email_verified: boolean;
 }
 
 export function signUp(email: string, password: string): Promise<AuthResult> {
@@ -26,13 +27,6 @@ export function changePassword(
   return apiFetch<void>('/rpc/change_password', {
     method: 'POST',
     body: JSON.stringify({ current_password, new_password }),
-  });
-}
-
-export function deleteAccount(password: string): Promise<void> {
-  return apiFetch<void>('/rpc/delete_account', {
-    method: 'POST',
-    body: JSON.stringify({ password }),
   });
 }
 

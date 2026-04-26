@@ -10,6 +10,10 @@ services:
     ports:
       - "3000:3000"        # expose for Vite dev proxy (npm run dev)
 
+  email-service:
+    ports:
+      - "5001:5001"  # expose for Vite dev proxy (npm run dev)
+
   # Run with: docker compose --profile adminer up
   adminer:
     image: adminer:4.8.1
@@ -38,14 +42,12 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./docker/db/tests:/tests:ro
-    entrypoint: []
-    command: >
-      psql
-        -v ON_ERROR_STOP=0
-        -h db
-        -U ${POSTGRES_USER}
-        -d ${POSTGRES_DB}
-        -f /tests/tests.sql
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=0 -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f /tests/migration_state.sql
+        psql -v ON_ERROR_STOP=0 -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f /tests/tests.sql
     profiles:
       - test
     networks:

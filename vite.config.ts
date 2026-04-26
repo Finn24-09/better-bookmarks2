@@ -27,6 +27,14 @@ export default defineConfig({
 
   server: {
     proxy: {
+      // Email service — must appear before the general /api rule.
+      // In dev, the email service exposes port 5001 on localhost (127.0.0.1:5001:5001).
+      // In production, Nginx routes /api/email/* internally; port 5001 is not public.
+      '/api/email': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/email/, ''),
+      },
       // Proxy /api/* → PostgREST at :3000 (strips the /api prefix)
       '/api': {
         target: 'http://localhost:3000',

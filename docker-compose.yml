@@ -57,6 +57,9 @@ services:
       PGRST_DB_POOL:                 10
       PGRST_SERVER_PORT:             3000
       PGRST_DB_EXTRA_SEARCH_PATH:    auth
+      # Pre-request hook validates JWT token_version to enable session invalidation
+      # after password reset or change (see 08_email_tokens.sql).
+      PGRST_DB_PRE_REQUEST:          api.check_token_version
     # No ports: PostgREST is on the internal network only.
     # nginx proxies /api/* → postgrest:3000 for all external traffic.
     cap_drop:
@@ -111,6 +114,56 @@ services:
           cpus: "0.5"
     networks:
       - betterbookmarks2
+
+  email-service:
+    build:
+      context: ./services/email
+      dockerfile: Dockerfile
+    container_name: bb2-email
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "5001"
+      EMAIL_DATABASE_URL: "postgres://email_svc:${EMAIL_DB_PASSWORD}@db:5432/${POSTGRES_DB}"
+      # Shares the PostgREST JWT secret so the service can verify user tokens.
+      # The email service uses jose with an explicit HS256 algorithm whitelist —
+      # it cannot forge tokens (it only verifies), but the shared secret means a
+      # compromised email service container could theoretically forge JWTs.
+      # Mitigation: keep the email service network-isolated (no external ports).
+      JWT_SECRET: "${PGRST_JWT_SECRET}"
+      SMTP_HOST: "${SMTP_HOST}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_SECURE: "${SMTP_SECURE:-false}"
+      SMTP_USER: "${SMTP_USER}"
+      SMTP_PASS: "${SMTP_PASS}"
+      SMTP_FROM: "${SMTP_FROM}"
+      APP_BASE_URL: "${APP_BASE_URL}"
+      AWS_SES_REGION: "${AWS_SES_REGION:-}"
+      AWS_SES_CONFIGURATION_SET: "${AWS_SES_CONFIGURATION_SET:-}"
+      AWS_SES_FROM_ARN: "${AWS_SES_FROM_ARN:-}"
+      COOKIE_SECRET: "${COOKIE_SECRET}"
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.5"
+    networks:
+      - betterbookmarks2
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5001/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   db_data:

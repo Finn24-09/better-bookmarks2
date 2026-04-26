@@ -17,6 +17,10 @@ export function setAuthToken(token: string | null): void {
   _token = token;
 }
 
+export function getToken(): string | null {
+  return _token;
+}
+
 /**
  * Base fetch wrapper. Prepends /api, injects Bearer token from memory,
  * and converts non-OK responses to ApiError using PostgREST's error format.
@@ -42,7 +46,6 @@ export async function apiFetch<T = unknown>(
       '/rpc/sign_in',
       '/rpc/sign_up',
       '/rpc/change_password',
-      '/rpc/delete_account',
     ];
     const isAuthRpc = AUTH_RPC_PATHS.some((p) => path.startsWith(p));
 

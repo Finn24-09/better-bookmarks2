@@ -77,6 +77,29 @@ describe('auth', () => {
     await expect(signUp('dup@example.com', 'password123')).rejects.toMatchObject({ status: 409 });
   });
 
+  // Regression pin (S-3 fallout): the dead `deleteAccount` export and its
+  // /rpc/delete_account entry in api.ts AUTH_RPC_PATHS were both pruned in the
+  // review-driven cleanup. AUTH_RPC_PATHS is *only* an error-message-relay
+  // list — it does not gate routing — but a future careless edit (typo, or
+  // re-purposing it as an allow-list) could silently break the live sign-up
+  // route. This test pins the canonical URL + method + body so that breakage
+  // surfaces as a unit-test failure, not a runtime "The requested resource
+  // was not found." toast.
+  it('signUp POSTs the body to /api/rpc/sign_up — full URL pin', async () => {
+    const fetchSpy = mockFetch(200, { token: 'tok', user_id: 'u1', email_verified: false });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await signUp('new@example.com', 'StrongPass12!');
+
+    const [url, opts] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/rpc/sign_up');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body as string)).toEqual({
+      email: 'new@example.com',
+      password: 'StrongPass12!',
+    });
+  });
+
   // -------------------------------------------------------------------------
   // changePassword
   // -------------------------------------------------------------------------

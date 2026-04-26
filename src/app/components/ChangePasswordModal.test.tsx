@@ -1,22 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import type { Bookmark } from '../../lib/bookmarks';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
 // ---------------------------------------------------------------------------
-const mockUpdateKey = vi.hoisted(() => vi.fn());
+const mockLogout = vi.hoisted(() => vi.fn());
+const mockNavigate = vi.hoisted(() => vi.fn());
 const mockCryptoKey = vi.hoisted(() => ({} as CryptoKey));
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
     email: 'user@example.com',
     cryptoKey: mockCryptoKey,
-    updateKey: mockUpdateKey,
+    logout: mockLogout,
   }),
 }));
+
+vi.mock('react-router', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('react-router')>();
+  return { ...mod, useNavigate: () => mockNavigate };
+});
 
 vi.mock('../../lib/auth', () => ({
   changePassword: vi.fn(),
@@ -45,6 +52,12 @@ vi.mock('../../lib/thumbnails', () => ({
 vi.mock('../../lib/api', () => ({
   apiFetch: vi.fn().mockResolvedValue(undefined),
 }));
+
+vi.mock('../../lib/email', () => ({
+  notifyPasswordChanged: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { notifyPasswordChanged } from '../../lib/email';
 
 // Suppress toast calls in tests (no Toaster rendered)
 vi.mock('sonner', () => ({
@@ -88,7 +101,14 @@ describe('ChangePasswordModal', () => {
   });
 
   function renderModal(open = true, onClose = vi.fn()) {
-    return { onClose, ...render(<ChangePasswordModal open={open} onClose={onClose} />) };
+    return {
+      onClose,
+      ...render(
+        <MemoryRouter>
+          <ChangePasswordModal open={open} onClose={onClose} />
+        </MemoryRouter>,
+      ),
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -145,13 +165,12 @@ describe('ChangePasswordModal', () => {
   // -------------------------------------------------------------------------
   // Successful submit
   // -------------------------------------------------------------------------
-  it('successful submit calls changePassword, deriveKey, updateKey, and onClose', async () => {
+  it('successful submit calls changePassword, deriveKey, then logs out and navigates to /login', async () => {
     const mockKey = {} as CryptoKey;
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
     vi.mocked(deriveKey).mockResolvedValue(mockKey);
-    const onClose = vi.fn();
     const user = userEvent.setup();
-    render(<ChangePasswordModal open={true} onClose={onClose} />);
+    renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
     await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
@@ -161,8 +180,8 @@ describe('ChangePasswordModal', () => {
     await waitFor(() => {
       expect(changePassword).toHaveBeenCalledWith('OldPass123!', 'StrongPass12!');
       expect(deriveKey).toHaveBeenCalledWith('StrongPass12!', 'user@example.com');
-      expect(mockUpdateKey).toHaveBeenCalledWith(mockKey);
-      expect(onClose).toHaveBeenCalled();
+      expect(mockLogout).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true });
     });
   });
 
@@ -283,6 +302,62 @@ describe('ChangePasswordModal', () => {
     await waitFor(() => {
       expect(calls).toEqual(['reencrypt', 'changePassword']);
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // N-3: notifyPasswordChanged() must run while the JWT is unambiguously
+  // valid. Calling it AFTER changePassword() races logout() (which clears
+  // the in-memory token) and risks a 401. Move it BEFORE changePassword.
+  // -------------------------------------------------------------------------
+  it('calls notifyPasswordChanged BEFORE changePassword (token is still valid pre-rotation)', async () => {
+    const calls: string[] = [];
+    vi.mocked(deriveKey).mockResolvedValue({} as CryptoKey);
+    vi.mocked(notifyPasswordChanged).mockImplementation(async () => {
+      calls.push('notify');
+    });
+    vi.mocked(changePassword).mockImplementation(async () => {
+      calls.push('changePassword');
+      return undefined as never;
+    });
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
+    await user.click(screen.getByRole('button', { name: /save password/i }));
+
+    await waitFor(() => {
+      expect(calls).toContain('notify');
+      expect(calls).toContain('changePassword');
+    });
+    // Ordering: notify runs before changePassword — token is unambiguously valid.
+    expect(calls.indexOf('notify')).toBeLessThan(calls.indexOf('changePassword'));
+  });
+
+  it('calls notifyPasswordChanged BEFORE logout (so getToken() still returns the JWT)', async () => {
+    const calls: string[] = [];
+    vi.mocked(deriveKey).mockResolvedValue({} as CryptoKey);
+    vi.mocked(changePassword).mockResolvedValue(undefined as never);
+    vi.mocked(notifyPasswordChanged).mockImplementation(async () => {
+      calls.push('notify');
+    });
+    mockLogout.mockImplementation(() => {
+      calls.push('logout');
+    });
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
+    await user.click(screen.getByRole('button', { name: /save password/i }));
+
+    await waitFor(() => {
+      expect(calls).toContain('notify');
+      expect(calls).toContain('logout');
+    });
+    expect(calls.indexOf('notify')).toBeLessThan(calls.indexOf('logout'));
   });
 
   // -------------------------------------------------------------------------

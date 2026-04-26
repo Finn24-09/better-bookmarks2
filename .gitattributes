@@ -1,2 +1,14 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Files that MUST be LF regardless of platform.
+# Shell scripts: a CRLF in the shebang makes Linux read `/bin/bash\r` and
+# fail with `bad interpreter: No such file or directory`. This breaks the
+# Postgres docker-entrypoint-initdb.d pipeline silently — the script aborts,
+# the data dir is left half-initialised, subsequent migrations never run.
+*.sh         text eol=lf
+# SQL init scripts and Dockerfiles run inside Linux containers; pin them too
+# to avoid surprise interactions with quoted heredocs.
+*.sql        text eol=lf
+Dockerfile   text eol=lf
+*.Dockerfile text eol=lf

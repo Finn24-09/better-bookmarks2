@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
 import { setAuthToken } from '../../lib/api';
 import { rotationStatus } from '../../lib/auth';
+import { resendVerificationEmail } from '../../lib/email';
 
 interface AuthState {
   token: string | null;
@@ -8,13 +9,15 @@ interface AuthState {
   email: string | null;
   cryptoKey: CryptoKey | null;
   partialRotation: { keyVersion: number } | null;
+  emailVerified: boolean;
 }
 
 interface AuthContextValue extends AuthState {
   isLoading: boolean;
-  login: (token: string, userId: string, email: string, cryptoKey: CryptoKey) => Promise<void>;
+  login: (token: string, userId: string, email: string, cryptoKey: CryptoKey, emailVerified: boolean, isNewAccount?: boolean) => Promise<void>;
   updateKey: (cryptoKey: CryptoKey) => void;
   clearPartialRotation: () => void;
+  setEmailVerified: (verified: boolean) => void;
   logout: () => void;
 }
 
@@ -27,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: null,
     cryptoKey: null,
     partialRotation: null,
+    emailVerified: false,
   });
 
   const login = async (
@@ -34,12 +38,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     userId: string,
     email: string,
     cryptoKey: CryptoKey,
+    emailVerified: boolean,
+    isNewAccount = false,
   ): Promise<void> => {
-    // All auth state is kept in memory only — no localStorage or sessionStorage.
-    // This prevents XSS from exfiltrating the JWT or the AES-256-GCM key bytes
-    // after a tab has been closed or in a separate browsing session.
     setAuthToken(token);
-    setState({ token, userId, email, cryptoKey, partialRotation: null });
+    setState({ token, userId, email, cryptoKey, partialRotation: null, emailVerified });
+
+    if (isNewAccount && !emailVerified) {
+      resendVerificationEmail().catch(() => {});
+    }
 
     try {
       const status = await rotationStatus();
@@ -59,14 +66,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, partialRotation: null }));
   };
 
+  const setEmailVerified = (verified: boolean) => {
+    setState((s) => ({ ...s, emailVerified: verified }));
+  };
+
   const logout = () => {
     setAuthToken(null);
-    setState({ token: null, userId: null, email: null, cryptoKey: null, partialRotation: null });
+    setState({ token: null, userId: null, email: null, cryptoKey: null, partialRotation: null, emailVerified: false });
   };
 
   return (
-    // isLoading is always false: there is no async storage restore to wait for.
-    <AuthContext.Provider value={{ ...state, isLoading: false, login, updateKey, clearPartialRotation, logout }}>
+    <AuthContext.Provider value={{ ...state, isLoading: false, login, updateKey, clearPartialRotation, setEmailVerified, logout }}>
       {children}
     </AuthContext.Provider>
   );
