@@ -1,22 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import type { Bookmark } from '../../lib/bookmarks';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
 // ---------------------------------------------------------------------------
-const mockUpdateKey = vi.hoisted(() => vi.fn());
+const mockLogout = vi.hoisted(() => vi.fn());
+const mockNavigate = vi.hoisted(() => vi.fn());
 const mockCryptoKey = vi.hoisted(() => ({} as CryptoKey));
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
     email: 'user@example.com',
     cryptoKey: mockCryptoKey,
-    updateKey: mockUpdateKey,
+    logout: mockLogout,
   }),
 }));
+
+vi.mock('react-router', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('react-router')>();
+  return { ...mod, useNavigate: () => mockNavigate };
+});
 
 vi.mock('../../lib/auth', () => ({
   changePassword: vi.fn(),
@@ -44,6 +51,10 @@ vi.mock('../../lib/thumbnails', () => ({
 
 vi.mock('../../lib/api', () => ({
   apiFetch: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../lib/email', () => ({
+  notifyPasswordChanged: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Suppress toast calls in tests (no Toaster rendered)
@@ -88,7 +99,14 @@ describe('ChangePasswordModal', () => {
   });
 
   function renderModal(open = true, onClose = vi.fn()) {
-    return { onClose, ...render(<ChangePasswordModal open={open} onClose={onClose} />) };
+    return {
+      onClose,
+      ...render(
+        <MemoryRouter>
+          <ChangePasswordModal open={open} onClose={onClose} />
+        </MemoryRouter>,
+      ),
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -145,13 +163,12 @@ describe('ChangePasswordModal', () => {
   // -------------------------------------------------------------------------
   // Successful submit
   // -------------------------------------------------------------------------
-  it('successful submit calls changePassword, deriveKey, updateKey, and onClose', async () => {
+  it('successful submit calls changePassword, deriveKey, then logs out and navigates to /login', async () => {
     const mockKey = {} as CryptoKey;
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
     vi.mocked(deriveKey).mockResolvedValue(mockKey);
-    const onClose = vi.fn();
     const user = userEvent.setup();
-    render(<ChangePasswordModal open={true} onClose={onClose} />);
+    renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
     await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
@@ -161,8 +178,8 @@ describe('ChangePasswordModal', () => {
     await waitFor(() => {
       expect(changePassword).toHaveBeenCalledWith('OldPass123!', 'StrongPass12!');
       expect(deriveKey).toHaveBeenCalledWith('StrongPass12!', 'user@example.com');
-      expect(mockUpdateKey).toHaveBeenCalledWith(mockKey);
-      expect(onClose).toHaveBeenCalled();
+      expect(mockLogout).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true });
     });
   });
 

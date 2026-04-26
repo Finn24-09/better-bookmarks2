@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
+import { useNavigate } from "react-router";
 import { X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -12,6 +13,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
 import { PasswordStrengthHints } from "./PasswordStrengthHints";
 import { changePassword, signIn, rotationStatus } from "../../lib/auth";
+import { notifyPasswordChanged } from "../../lib/email";
 import { deriveKey } from "../../lib/crypto";
 import { getBookmarks, reencryptBookmark } from "../../lib/bookmarks";
 import { getTags, reencryptTag } from "../../lib/tags";
@@ -38,7 +40,8 @@ function validatePasswordComplexity(v: string): true | string {
 }
 
 export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps) {
-  const { email, cryptoKey, updateKey } = useAuth();
+  const { email, cryptoKey, logout } = useAuth();
+  const navigate = useNavigate();
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -105,13 +108,14 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
       await Promise.all(allTags.map((tag) => reencryptTag(tag.id, tag.name, newKey, targetVersion)));
 
       // Only update the DB password after all re-encryption succeeds.
+      // changePassword increments token_version, which immediately invalidates
+      // the current JWT — logout and redirect so the user gets a fresh session.
       await changePassword(data.currentPassword, data.newPassword);
 
-      // Switch to new key in memory.
-      updateKey(newKey);
-
-      toast.success("Password updated");
-      handleClose();
+      notifyPasswordChanged(); // fire-and-forget; still valid before logout clears the token
+      logout();
+      navigate('/login', { replace: true });
+      toast.success("Password updated — please sign in with your new password.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not change password. Check your current password and try again.");
     } finally {
