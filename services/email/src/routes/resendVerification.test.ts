@@ -57,6 +57,7 @@ describe('POST /resend-verification', () => {
       .mockResolvedValueOnce({ rows: [] })                                                           // BEGIN
       .mockResolvedValueOnce({ rows: [] })                                                           // advisory lock
       .mockResolvedValueOnce({ rowCount: 0, rows: [] })                                              // cooldown
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ count: '0' }] })                                // daily ceiling
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ email: 'a@b.c', email_verified: false }] })    // user
       .mockResolvedValueOnce({ rows: [] })                                                           // upsert_email_token
       .mockResolvedValueOnce({ rows: [] })                                                           // INSERT log
@@ -80,13 +81,14 @@ describe('POST /resend-verification', () => {
   });
 
   // ── B-1: SQL injection guard ──────────────────────────────────────────────
-  it('B-1: cooldown query parameterises COOLDOWN_MINUTES (no template-literal interpolation)', async () => {
+  it('B-1: cooldown query parameterises COOLDOWN_SECONDS (no template-literal interpolation)', async () => {
     // Set up: cooldown returns nothing, user found and unverified, upsert + insert + sendMail succeed.
     // We need cooldown SELECT + user SELECT + upsert + log INSERT to all succeed via the transaction client.
     mockQuery
       .mockResolvedValueOnce({ rows: [] })                                                           // BEGIN
-      .mockResolvedValueOnce({ rows: [] })                                                           // FOR UPDATE row lock
+      .mockResolvedValueOnce({ rows: [] })                                                           // advisory lock
       .mockResolvedValueOnce({ rowCount: 0, rows: [] })                                              // cooldown
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ count: '0' }] })                                // daily ceiling
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ email: 'a@b.c', email_verified: false }] })    // user
       .mockResolvedValueOnce({ rows: [] })                                                           // upsert_email_token
       .mockResolvedValueOnce({ rows: [] })                                                           // INSERT log
@@ -107,14 +109,14 @@ describe('POST /resend-verification', () => {
     expect(cooldownCall, 'cooldown SELECT against email_send_log was issued').toBeDefined();
 
     const sql = String(cooldownCall![0]);
-    // Must use parameterised interval multiplication ($N * INTERVAL '1 minute'),
-    // never embed COOLDOWN_MINUTES (=10) directly into the SQL text.
-    expect(sql).not.toMatch(/INTERVAL\s+'10\s+minutes?'/i);
-    expect(sql).toMatch(/\$\d+\s*\*\s*INTERVAL\s+'1\s+minute'/i);
+    // Must use parameterised interval multiplication ($N * INTERVAL '1 second'),
+    // never embed COOLDOWN_SECONDS (=60) directly into the SQL text.
+    expect(sql).not.toMatch(/INTERVAL\s+'60\s+seconds?'/i);
+    expect(sql).toMatch(/\$\d+\s*\*\s*INTERVAL\s+'1\s+second'/i);
 
     // Params must include the cooldown count as the second parameter.
     const params = cooldownCall![1] as unknown[];
-    expect(params).toContain(10); // COOLDOWN_MINUTES
+    expect(params).toContain(60); // COOLDOWN_SECONDS
   });
 
   // ── S-1: cooldown returns 429 before further DB work ──────────────────────
@@ -167,8 +169,9 @@ describe('POST /resend-verification', () => {
   it('S-1: already-verified user → 200, no upsert/log/sendMail', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [] })                                                          // BEGIN
-      .mockResolvedValueOnce({ rows: [] })                                                          // FOR UPDATE row lock
+      .mockResolvedValueOnce({ rows: [] })                                                          // advisory lock
       .mockResolvedValueOnce({ rowCount: 0, rows: [] })                                             // cooldown
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ count: '0' }] })                               // daily ceiling
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ email: 'a@b.c', email_verified: true }] })   // user
       .mockResolvedValueOnce({ rows: [] });                                                         // ROLLBACK or COMMIT
 
@@ -186,12 +189,42 @@ describe('POST /resend-verification', () => {
     expect(mockSendMail).not.toHaveBeenCalled();
   });
 
+  // ── Daily ceiling caps mail-bombing exposure even when cooldown elapses ──
+  // Without this, the 60s cooldown allows ~1,440 verification mails/24h per
+  // JWT — sufficient to trash a bounce/complaint rate. The route must reject
+  // with 429 once 10 successful sends have been logged in the trailing 24h.
+  it('returns 429 when the per-user 24h ceiling has been hit', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })                                                          // BEGIN
+      .mockResolvedValueOnce({ rows: [] })                                                          // advisory lock
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })                                             // cooldown miss
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ count: '10' }] })                              // daily ceiling HIT
+      .mockResolvedValueOnce({ rows: [] });                                                         // ROLLBACK
+
+    const res = await makeApp().inject({
+      method: 'POST',
+      url: '/resend-verification',
+      headers: { authorization: `Bearer ${await makeToken()}`, 'content-type': 'application/json' },
+      body: '{}',
+    });
+
+    expect(res.statusCode).toBe(429);
+    const allSql = mockQuery.mock.calls.map(c => String(c[0])).join('\n');
+    // Ceiling rejection short-circuits before user lookup, upsert, log insert.
+    expect(allSql).not.toMatch(/SELECT\s+email/i);
+    expect(allSql).not.toMatch(/upsert_email_token/i);
+    expect(allSql).not.toMatch(/INSERT INTO auth\.email_send_log/i);
+    expect(mockSendMail).not.toHaveBeenCalled();
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
   // ── S-1: success path inserts log + sends email ───────────────────────────
   it('S-1: success path performs upsert, log insert, and sendMail (atomic)', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [] })                                                          // BEGIN
-      .mockResolvedValueOnce({ rows: [] })                                                          // FOR UPDATE row lock
+      .mockResolvedValueOnce({ rows: [] })                                                          // advisory lock
       .mockResolvedValueOnce({ rowCount: 0, rows: [] })                                             // cooldown
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ count: '0' }] })                               // daily ceiling
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ email: 'a@b.c', email_verified: false }] })   // user
       .mockResolvedValueOnce({ rows: [] })                                                          // upsert_email_token
       .mockResolvedValueOnce({ rows: [] })                                                          // INSERT log

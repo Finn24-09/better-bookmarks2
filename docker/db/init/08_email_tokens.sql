@@ -464,13 +464,13 @@ BEGIN
     new_user.id,
     new_user.email,
     COALESCE(new_user.token_version, 0),
-    COALESCE(new_user.email_verified, false)
+    COALESCE(new_user.email_verified, FALSE)
   );
 
   RETURN json_build_object(
     'token',          token,
     'user_id',        new_user.id,
-    'email_verified', COALESCE(new_user.email_verified, false)
+    'email_verified', COALESCE(new_user.email_verified, FALSE)
   );
 EXCEPTION
   WHEN unique_violation THEN
@@ -481,7 +481,65 @@ $$;
 GRANT EXECUTE ON FUNCTION api.sign_up(TEXT, TEXT) TO anon;
 
 -- ---------------------------------------------------------------------------
--- Update sign_in: include email_verified in return payload.
+-- Canonical api.sign_in. Two invariants that have regressed in the past and
+-- must be preserved together:
+--
+--   1. ERRCODE = 'check_violation' (SQLSTATE 23514 → HTTP 400). PostgREST
+--      relays 400 bodies to the client, so the user-facing toast surfaces
+--      "Invalid email or password". The earlier 'invalid_password' (28P01 →
+--      HTTP 403) was masked by src/lib/api.ts with a generic permission error
+--      to prevent schema leakage, hiding the validation message.
+--      change_password and auth.delete_account_with_password keep
+--      'invalid_password' on purpose — their callers are already authenticated
+--      and a 403 is semantically correct there.
+--
+--   2. _sign_jwt MUST be called with all four arguments. The 2-arg overload
+--      was removed above; the 4-arg variant has DEFAULTs (tv=0,
+--      email_verified=FALSE), so a 2-arg call type-checks but issues a broken
+--      session: the JWT mis-claims tv=0, locking out any user with
+--      token_version > 0 via api.check_token_version() (PT401 'Session
+--      invalidated' on every authenticated request), and reports
+--      email_verified=false regardless of database state. Always pass
+--      token_version and email_verified explicitly from the loaded row.
+--
+-- The 'email_verified' field in the JSON return is consumed by the frontend
+-- AuthContext for the verification banner. The matching JWT claim is
+-- advisory only; if a future RPC needs to gate behavior on verification,
+-- enforce against auth.users.email_verified, NEVER the JWT claim, since a
+-- user who verifies after sign-in would otherwise be wrongly blocked until
+-- their JWT expires.
+--
+-- DEPLOYMENT NOTE — forced re-login window:
+-- An earlier shipped state of api.sign_in violated invariant 2 (called the
+-- 4-arg _sign_jwt with only 2 args, getting tv=0 from the default). JWTs
+-- minted in that window carry tv=0 regardless of the user's actual
+-- token_version. After this canonical definition takes effect, those JWTs
+-- continue to fail api.check_token_version() until they expire (24h) or the
+-- user signs back in. Operators should expect a one-time spike of
+-- "Session invalidated" / forced sign-in events post-deploy. This is the
+-- intended outcome — the JWTs were issued with a broken claim and cannot be
+-- repaired in place. Do NOT respond by rolling back this definition.
+--
+-- Scope of the H-2 invalidation: api.check_token_version() is the
+-- PGRST_DB_PRE_REQUEST hook, so it covers every PostgREST RPC and table
+-- access. The Fastify email service (services/email/src/jwt.ts) currently
+-- verifies signature/role/sub/exp but does NOT check the 'tv' claim, so a
+-- pre-rotation JWT continues to authenticate /resend-verification,
+-- /request-delete, and /notify-password-change for the remainder of its 24h
+-- lifetime. The blast radius is bounded by the route-level rate limits and
+-- by the fact that none of those routes return user data — they only
+-- enqueue mail to the legitimate user's address. If you ever need a stricter
+-- invalidation guarantee, mirror check_token_version() into verifyJwt; do
+-- not rely on the deployment-time spike covering email-service traffic.
+--
+-- Other tv-bumping triggers besides this one-time deploy event:
+--   - api.change_password (this file, below) increments token_version on
+--     every successful password change — that's a self-service action and
+--     a normal "Session invalidated" event for the user's other devices.
+--   - auth.reset_password_destroy_data (this file, above) increments
+--     token_version on password reset.
+-- A "Session invalidated" log line is therefore not always evidence of a
+-- security incident.
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION api.sign_in(
@@ -497,26 +555,34 @@ DECLARE
   found_user auth.users;
   token      TEXT;
 BEGIN
+  -- Look up user and verify bcrypt hash in a single query.
+  -- crypt(input, stored_hash) recomputes bcrypt with the stored salt and
+  -- compares — constant-time, irreversible.
   SELECT * INTO found_user
   FROM auth.users
   WHERE auth.users.email = lower(trim(sign_in.email))
     AND auth.users.password = crypt(sign_in.password, auth.users.password);
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'Invalid email or password' USING ERRCODE = 'invalid_password';
+    -- Same error for unknown email and wrong password (no enumeration).
+    -- check_violation → HTTP 400 → relayed to user by api.ts auth-RPC path.
+    RAISE EXCEPTION 'Invalid email or password' USING ERRCODE = 'check_violation';
   END IF;
 
+  -- Pass all four args explicitly — relying on the 4-arg defaults issues a
+  -- JWT with tv=0 / email_verified=false regardless of user state. See the
+  -- header comment above for the full regression history.
   token := api._sign_jwt(
     found_user.id,
     found_user.email,
     COALESCE(found_user.token_version, 0),
-    COALESCE(found_user.email_verified, false)
+    COALESCE(found_user.email_verified, FALSE)
   );
 
   RETURN json_build_object(
     'token',          token,
     'user_id',        found_user.id,
-    'email_verified', COALESCE(found_user.email_verified, false)
+    'email_verified', COALESCE(found_user.email_verified, FALSE)
   );
 END;
 $$;

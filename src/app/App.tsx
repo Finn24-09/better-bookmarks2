@@ -35,7 +35,10 @@ function useHashFragmentHandler() {
     if (!hash) return;
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
 
-    if (hash.startsWith('#email-verified')) {
+    // Match the bare fragment OR the fragment followed by a `?` — never use
+    // a loose startsWith. See AuthPage.tsx for the unauthenticated mirror of
+    // this handler and the rationale.
+    if (hash === '#email-verified' || hash.startsWith('#email-verified?')) {
       const params = new URLSearchParams(hash.slice('#email-verified'.length));
       if (params.get('success') === 'true') {
         setEmailVerified(true);
@@ -43,7 +46,7 @@ function useHashFragmentHandler() {
       } else {
         toast.error('Email verification failed. The link may have expired.');
       }
-    } else if (hash.startsWith('#delete-confirmed')) {
+    } else if (hash === '#delete-confirmed' || hash.startsWith('#delete-confirmed?')) {
       const params = new URLSearchParams(hash.slice('#delete-confirmed'.length));
       const token = params.get('token');
       if (token) setDeleteToken(token);

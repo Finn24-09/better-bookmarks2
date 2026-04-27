@@ -35,6 +35,12 @@ export function ForgotPasswordModal({ onClose }: Props) {
       // leaking transport / schema details (matches the api.ts sanitization
       // pattern). The route always returns 200 on success, so any throw here
       // is a transport-layer failure the user can retry.
+      //
+      // Critical: this flow is pre-auth, so it MUST stay enumeration-safe.
+      // The `done` branch transitions regardless of whether the email exists
+      // and the toast above only fires on transport failures. Do NOT add a
+      // server-rejection toast here. EmailVerificationBanner has the inverse
+      // rule (post-auth, safe to toast); see the note at the top of that file.
       toast.error('Could not send the reset link. Please try again.');
       setState('idle');
     }

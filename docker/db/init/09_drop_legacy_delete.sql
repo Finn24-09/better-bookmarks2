@@ -1,11 +1,17 @@
 BEGIN;
 
--- The email-confirmed deletion flow (POST /api/email/confirm-delete) is the only
--- permitted account deletion path. The direct PostgREST RPC allowed any authenticated
--- user to delete their account with just a password — no email confirmation required.
--- Revoking it closes the bypass; auth.delete_account_with_password() (SECURITY DEFINER,
--- called only by email_svc after token redemption) remains the sole deletion mechanism.
-REVOKE EXECUTE ON FUNCTION api.delete_account(TEXT) FROM app_user;
+-- Historical: a previous schema version exposed api.delete_account(TEXT) as a
+-- PostgREST RPC that let any authenticated user delete their own account
+-- with just a password — no email-token confirmation. The email-confirmed
+-- flow (POST /api/email/confirm-delete, redeems an email token, then calls
+-- auth.delete_account_with_password() which is granted only to email_svc) is
+-- now the sole permitted deletion path.
+--
+-- This script is the safety net: on a fresh volume the legacy function never
+-- gets created, so the DROP IF EXISTS is a no-op. On an existing volume that
+-- predates this file, it removes the legacy function and its grant. Use
+-- DROP ... IF EXISTS (which also drops dependent grants) so the script is
+-- idempotent regardless of whether the function is present.
 DROP FUNCTION IF EXISTS api.delete_account(TEXT);
 
 COMMIT;

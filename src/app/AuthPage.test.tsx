@@ -42,6 +42,9 @@ import { ApiError } from '../lib/api';
 describe('AuthPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset hash between tests so #email-verified / #reset-password fragments
+    // from one test don't bleed into the next.
+    window.history.replaceState(null, '', window.location.pathname);
   });
 
   function renderPage() {
@@ -293,6 +296,57 @@ describe('AuthPage', () => {
     // Critical security facts must survive the trim.
     expect(text).toMatch(/encryption|encrypted|key/i);
     expect(text).toMatch(/delete|lose|losing|permanently/i);
+  });
+
+  // -------------------------------------------------------------------------
+  // Hash fragment — email verification redirect (regression: the verification
+  // link bounces through ProtectedRoute → /login with the hash preserved.
+  // AuthPage previously only handled #reset-password, so the success/error
+  // toast never fired and the hash was dropped on the next navigate("/"),
+  // leaving the user with no feedback that their email was verified.)
+  // -------------------------------------------------------------------------
+
+  it('renders a success toast and clears the hash when location hash is #email-verified?success=true', async () => {
+    window.history.replaceState(null, '', '/login#email-verified?success=true');
+    renderPage();
+
+    await waitFor(() =>
+      // The unauthenticated path tells the user to sign in; the authenticated
+      // mirror in App.tsx omits "sign in" because the user is already in.
+      // Pin the unique copy here so the two handlers don't drift silently.
+      expect(toast.success).toHaveBeenCalledWith(
+        expect.stringMatching(/verified.*sign in/i),
+      ),
+    );
+    expect(window.location.hash).toBe('');
+  });
+
+  it('renders an error toast and clears the hash when location hash is #email-verified?error=expired', async () => {
+    window.history.replaceState(null, '', '/login#email-verified?error=expired');
+    renderPage();
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(/verification.*(failed|expired|invalid)/i),
+      ),
+    );
+    expect(window.location.hash).toBe('');
+  });
+
+  // Defense-in-depth: the previous startsWith('#email-verified') check would
+  // match attacker-crafted look-alike fragments like #email-verified-evil.
+  // The strings we toast are hardcoded so reflection is not possible today,
+  // but pin the prefix shape so a future edit can't accidentally widen it.
+  it('does not toast or clear hash for an unrelated lookalike fragment', async () => {
+    window.history.replaceState(null, '', '/login#email-verified-evil?success=true');
+    renderPage();
+
+    // Give the effect a chance to run.
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#email-verified-evil?success=true');
   });
 
   it('shows password strength hints in the register form after typing', async () => {

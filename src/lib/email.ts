@@ -25,7 +25,12 @@ export async function requestPasswordReset(email: string): Promise<void> {
 }
 
 export async function resendVerificationEmail(): Promise<void> {
-  await emailFetch('/resend-verification', {}, true);
+  // fetch() does NOT reject on non-2xx responses — without this guard the
+  // banner's catch branch only fires on network failures, so server-side
+  // 429 (cooldown hit) and 500 (sendMail failure) would silently look like
+  // success to the user. Match the requestAccountDeletion() pattern below.
+  const res = await emailFetch('/resend-verification', {}, true);
+  if (!res.ok) throw new Error('Failed to resend verification email');
 }
 
 export async function requestAccountDeletion(): Promise<void> {

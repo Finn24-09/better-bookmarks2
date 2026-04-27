@@ -41,6 +41,19 @@ describe('resendVerificationEmail', () => {
     const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect((opts.headers as Record<string, string>)['Authorization']).toBe('Bearer mock-jwt-token');
   });
+
+  // Without this, the 429/500 paths in the route silently look like success
+  // to the banner — fetch resolves on non-2xx, so only network rejection
+  // would have surfaced as an error and the user-facing toast would never fire.
+  it('throws when the server responds with 429', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 429 }));
+    await expect(resendVerificationEmail()).rejects.toThrow();
+  });
+
+  it('throws when the server responds with 500', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 500 }));
+    await expect(resendVerificationEmail()).rejects.toThrow();
+  });
 });
 
 describe('requestAccountDeletion', () => {

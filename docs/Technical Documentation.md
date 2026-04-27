@@ -956,15 +956,15 @@ Postgres runs every script in `docker/db/init/` exactly once on first startup:
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `00_extensions.sql`               | `pgcrypto`, `pgjwt`, optional `pgtap`                                                                                 |
 | `01_schema.sql`                   | Schemas, roles, base tables, the initial `bookmarks_with_tags` view, table grants                                     |
-| `02_auth_functions.sql`           | `_sign_jwt`, `sign_up`, `sign_in`, `change_password`, (legacy `delete_account` — dropped by 09)                       |
 | `03_rls.sql`                      | `current_user_id()` (VOLATILE — see comment), RLS enable + policies on every table                                    |
 | `04_indexes.sql`                  | Performance indexes                                                                                                   |
 | `05_thumbnail_images.sql`         | `api.thumbnail_images`, FK from bookmarks, view rebuild, RLS                                                          |
-| `06_key_versioning.sql`           | `key_version` columns, `rotation_status()`, view rebuild with `key_version` / `thumbnail_key_version`, replaced `change_password` |
+| `06_key_versioning.sql`           | `key_version` columns, `rotation_status()`, view rebuild with `key_version` / `thumbnail_key_version`, first definition of `change_password` (replaced by 08) |
 | `06_set_jwt_secret.sh`            | `ALTER DATABASE ... SET app.settings.jwt_secret` (fallback path for direct connections; PostgREST also injects this via `PGRST_APP_SETTINGS_JWT_SECRET`) |
 | `07_email_service_role.sh`        | Creates the `email_svc` login role with the password from `EMAIL_DB_PASSWORD`                                         |
-| `08_email_tokens.sql`             | `email_tokens`, `email_send_log`, `security_audit_log`, all SECURITY DEFINER helpers, `check_token_version` pre-request hook, JWT-claim upgrade (`tv`, `email_verified`) |
-| `09_drop_legacy_delete.sql`       | Drops `api.delete_account(TEXT)` so the email-confirmed flow is the only deletion path                                |
+| `08_email_tokens.sql`             | `email_tokens`, `email_send_log`, `security_audit_log`, all SECURITY DEFINER helpers, `check_token_version` pre-request hook, **canonical `_sign_jwt` (4-arg), `sign_up`, `sign_in`, and `change_password`** with JWT-claim upgrade (`tv`, `email_verified`) |
+| `09_drop_legacy_delete.sql`       | Idempotent `DROP FUNCTION IF EXISTS api.delete_account(TEXT)` — safety net for older volumes where the legacy RPC was previously created |
+| `10_password_change_notification_log.sql` | `auth.security_audit_log` enum extension for password-change notification events (must run in its own transaction; `ALTER TYPE ... ADD VALUE` cannot share a transaction with the values it adds) |
 
 Re-running 08 against a database with the older `auth.reset_password_destroy_data` signature is safe — the script `DROP FUNCTION IF EXISTS` first because PostgreSQL refuses to rename input parameters via `CREATE OR REPLACE FUNCTION`.
 

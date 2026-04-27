@@ -5,7 +5,18 @@ import { sendMail } from '../mailer.js';
 import { verifyEmailTemplate } from '../templates/verifyEmail.js';
 import { verifyJwt } from '../jwt.js';
 
-const COOLDOWN_MINUTES = 10;
+// Per-user resend cooldown. Kept in sync with the EmailVerificationBanner
+// constant (COOLDOWN_MS) so the client can never request a resend before the
+// server allows it. This is the per-user UX guard.
+const COOLDOWN_SECONDS = 60;
+
+// Per-user absolute ceiling. Without this, the 60-second cooldown allows up
+// to 1,440 verification mails per day per JWT — a mail-bombing primitive
+// against the legitimate user's inbox (and our SES bounce/complaint rate).
+// Compute against the same email_send_log; cleanup runs at 24h so the window
+// is naturally bounded. Apply only to email_verification — password_reset
+// gets enumeration-safe rate limiting via its own route.
+const DAILY_CEILING = 10;
 
 export const resendVerificationRoute: FastifyPluginAsync = async (fastify) => {
   fastify.post('/resend-verification', async (req, reply) => {
@@ -46,11 +57,23 @@ export const resendVerificationRoute: FastifyPluginAsync = async (fastify) => {
         `SELECT 1 FROM auth.email_send_log
          WHERE user_id = $1
            AND token_type = 'email_verification'
-           AND sent_at > NOW() - ($2 * INTERVAL '1 minute')
+           AND sent_at > NOW() - ($2 * INTERVAL '1 second')
          LIMIT 1`,
-        [userId, COOLDOWN_MINUTES],
+        [userId, COOLDOWN_SECONDS],
       );
       if (cooldownResult.rowCount) {
+        await client.query('ROLLBACK');
+        return reply.status(429).send({ error: 'Too many requests' });
+      }
+
+      const ceilingResult = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::TEXT AS count FROM auth.email_send_log
+         WHERE user_id = $1
+           AND token_type = 'email_verification'
+           AND sent_at > NOW() - INTERVAL '24 hours'`,
+        [userId],
+      );
+      if (Number(ceilingResult.rows[0]?.count ?? '0') >= DAILY_CEILING) {
         await client.query('ROLLBACK');
         return reply.status(429).send({ error: 'Too many requests' });
       }

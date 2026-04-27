@@ -1,20 +1,37 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MailCheck, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 import { resendVerificationEmail } from '../../lib/email';
 
-// Aligned with the server-side cooldown (resendVerification.ts: 10 minutes).
-// A shorter client window would let the user click again before the server
-// allows it, get 429-rejected, and see no feedback (the catch below is
-// intentionally silent because the banner stays visible regardless).
-const COOLDOWN_MS = 10 * 60_000;
+// NOTE on toast-on-error: it is safe to surface resend-failure feedback here
+// because this banner only renders for an *authenticated* user — the attacker
+// has already proved possession of the password before reaching this code, so
+// no enumeration signal is leaked. The mirror rule applies in reverse to
+// ForgotPasswordModal: that flow MUST NOT toast a server-rejection state,
+// otherwise it becomes an account-existence oracle. Keep this asymmetry.
+
+// Aligned with the server-side cooldown (resendVerification.ts: 60 s).
+// Server and client must stay in sync so the user can never click before the
+// server allows a resend — a mismatch lets the request 429 with no UI feedback.
+const COOLDOWN_MS = 60_000;
 
 export function EmailVerificationBanner() {
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
+  // Drives the per-second re-render while the cooldown is active. secondsLeft
+  // is derived from Date.now(), so without a tick the label would freeze at
+  // its initial value until the next click.
+  const [, setTick] = useState(0);
 
   const now = Date.now();
   const isCooling = cooldownUntil !== null && now < cooldownUntil;
   const secondsLeft = isCooling ? Math.ceil((cooldownUntil! - now) / 1000) : 0;
+
+  useEffect(() => {
+    if (!isCooling) return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [isCooling]);
 
   const handleResend = async () => {
     if (isCooling || sending) return;
@@ -22,8 +39,9 @@ export function EmailVerificationBanner() {
     try {
       await resendVerificationEmail();
       setCooldownUntil(Date.now() + COOLDOWN_MS);
+      toast.success('Verification email sent. Please check your inbox.');
     } catch {
-      // silently ignore — the banner stays visible
+      toast.error('Could not resend verification email. Please try again shortly.');
     } finally {
       setSending(false);
     }

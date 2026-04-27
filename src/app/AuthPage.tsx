@@ -260,8 +260,32 @@ export function AuthPage() {
   const [showResetPassword, setShowResetPassword] = useState(false);
 
   useEffect(() => {
-    if (window.location.hash === '#reset-password') {
+    const hash = window.location.hash;
+    if (!hash) return;
+
+    if (hash === '#reset-password') {
       setShowResetPassword(true);
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      return;
+    }
+
+    // The verification link redirects to /#email-verified?... — when the user
+    // is unauthenticated (closed the tab, opened the link in another browser)
+    // ProtectedRoute bounces them here with the hash preserved, so this page
+    // is the canonical place to surface the result.
+    //
+    // Match the bare fragment OR the fragment followed by a `?` — never use
+    // a loose startsWith, otherwise a phishing URL like
+    // `/login#email-verified-evil?error=...click+here` would also match. The
+    // strings we toast are hardcoded, so the value is never reflected, but
+    // pinning the prefix keeps it that way under future edits.
+    if (hash === '#email-verified' || hash.startsWith('#email-verified?')) {
+      const params = new URLSearchParams(hash.slice('#email-verified'.length));
+      if (params.get('success') === 'true') {
+        toast.success('Email verified successfully. Please sign in.');
+      } else {
+        toast.error('Email verification failed. The link may have expired.');
+      }
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }, []);

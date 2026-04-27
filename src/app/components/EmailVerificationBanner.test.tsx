@@ -1,15 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { EmailVerificationBanner } from './EmailVerificationBanner';
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 
 vi.mock('../../lib/email', () => ({
   resendVerificationEmail: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { resendVerificationEmail } from '../../lib/email';
+import { toast } from 'sonner';
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('EmailVerificationBanner', () => {
@@ -51,11 +60,11 @@ describe('EmailVerificationBanner', () => {
   });
 
   // -------------------------------------------------------------------------
-  // N-2: Client cooldown must match the server cooldown (10 min). Otherwise
-  // the user clicks at 60 s, the server immediately 429s, and the empty
-  // catch block hides the failure. Aligning to 10 min avoids the race entirely.
+  // Client cooldown must match the server cooldown so the resend never gets
+  // a server 429 the user can't see. Server cooldown is 60 s; assert the
+  // initial countdown is in that ballpark (allow ±5 s for scheduling jitter).
   // -------------------------------------------------------------------------
-  it('cooldown countdown shows ~10 minutes (>60 s) immediately after a successful send', async () => {
+  it('cooldown countdown shows ~60 seconds immediately after a successful send', async () => {
     render(<EmailVerificationBanner />);
     fireEvent.click(screen.getByRole('button', { name: /resend email/i }));
 
@@ -64,8 +73,45 @@ describe('EmailVerificationBanner', () => {
     const match = label.match(/(\d+)/);
     expect(match).not.toBeNull();
     const seconds = Number(match![1]);
-    // 60 s cooldown would yield exactly 60 here. 10-min cooldown yields ~600.
-    // Any value > 60 proves the constant is no longer 60_000.
-    expect(seconds).toBeGreaterThan(60);
+    expect(seconds).toBeGreaterThanOrEqual(55);
+    expect(seconds).toBeLessThanOrEqual(60);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression pin: previously secondsLeft was computed from Date.now() at
+  // render time only, with no timer to trigger re-renders, so the label
+  // stayed frozen at ~60 until the cooldown lapsed entirely. Verify the
+  // displayed second count actually decreases as time advances.
+  // -------------------------------------------------------------------------
+  it('cooldown countdown ticks down once per second', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<EmailVerificationBanner />);
+    fireEvent.click(screen.getByRole('button', { name: /resend email/i }));
+
+    const initial = await screen.findByRole('button', { name: /resend in/i });
+    const initialSeconds = Number((initial.textContent ?? '').match(/(\d+)/)?.[1]);
+    expect(Number.isFinite(initialSeconds)).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    const later = screen.getByRole('button', { name: /resend in/i });
+    const laterSeconds = Number((later.textContent ?? '').match(/(\d+)/)?.[1]);
+    expect(laterSeconds).toBeLessThan(initialSeconds);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression pin: the previous catch block silently swallowed errors,
+  // leaving the user with no feedback when the server rate-limited or the
+  // request failed. Surface failures via toast.
+  // -------------------------------------------------------------------------
+  it('shows an error toast when the resend request fails', async () => {
+    vi.mocked(resendVerificationEmail).mockRejectedValueOnce(new Error('boom'));
+    render(<EmailVerificationBanner />);
+    fireEvent.click(screen.getByRole('button', { name: /resend email/i }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled();
+    });
   });
 });
