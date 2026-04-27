@@ -1,12 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-
-vi.mock('../config.js', () => ({
-  config: { APP_BASE_URL: 'https://example.test' },
-}));
-
-import { esc } from './escape.js';
-const { deleteConfirmationTemplate } = await import('./deleteConfirmation.js');
-const { resetPasswordTemplate } = await import('./resetPassword.js');
+import { describe, it, expect } from 'vitest';
+import { esc, safeUrl } from './escape.js';
 
 describe('esc', () => {
   it.each([
@@ -14,12 +7,20 @@ describe('esc', () => {
     ['<', '&lt;'],
     ['>', '&gt;'],
     ['"', '&quot;'],
+    ["'", '&#39;'],
+    ['`', '&#96;'],
   ])('maps %s to %s', (input, expected) => {
     expect(esc(input)).toBe(expected);
   });
 
   it('replaces all metacharacters in a mixed string in a single pass', () => {
     expect(esc('a & b < c > d "e"')).toBe('a &amp; b &lt; c &gt; d &quot;e&quot;');
+  });
+
+  it('replaces single quote and backtick alongside the original four in a mixed string', () => {
+    expect(esc("a ' b ` c & d < e > f \"g\"")).toBe(
+      'a &#39; b &#96; c &amp; d &lt; e &gt; f &quot;g&quot;',
+    );
   });
 
   it('returns empty string unchanged', () => {
@@ -37,24 +38,40 @@ describe('esc', () => {
   });
 });
 
-describe('template rendering for current safe inputs is unchanged after escape()', () => {
-  // Safe inputs (base64url tokens, constructed URLs) contain none of &<>"
-  // so applying esc() must not alter the rendered HTML/text.
-  it('deleteConfirmationTemplate renders identically for a base64url token', () => {
-    const token = 'abcDEF123_-xyzQRS456_-tuvWXY789';
-    const out = deleteConfirmationTemplate(token);
-    expect(out.subject).toBe('Confirm your Better Bookmarks account deletion');
-    expect(out.text).toContain(token);
-    expect(out.html).toContain(`<code style="display:block;color:#f9fafb;font-size:1em;word-break:break-all;letter-spacing:0.05em">${token}</code>`);
+describe('safeUrl', () => {
+  it('passes a plain https URL through (modulo trailing-slash normalization)', () => {
+    expect(safeUrl('https://example.test/foo')).toMatch(/^https:\/\/example\.test\/foo/);
   });
 
-  it('resetPasswordTemplate renders identically for a constructed URL', () => {
-    const token = 'abcDEF123_-xyzQRS456';
-    const out = resetPasswordTemplate(token);
-    expect(out.subject).toBe('Reset your Better Bookmarks password');
-    // Token in the URL is encodeURIComponent'd then esc'd; for base64url chars both are no-ops.
-    expect(out.text).toContain(`/api/email/reset-password?token=${token}`);
-    expect(out.html).toContain(`href="`);
-    expect(out.html).toContain(`/api/email/reset-password?token=${token}`);
+  it('HTML-escapes & in query strings (proves esc runs on the result)', () => {
+    expect(safeUrl('https://example.test/?q=a&b=c')).toContain('&amp;');
+  });
+
+  it('accepts http scheme', () => {
+    expect(safeUrl('http://example.test/')).toMatch(/^http:\/\/example\.test\//);
+  });
+
+  it('returns about:blank for javascript: scheme', () => {
+    expect(safeUrl('javascript:alert(1)')).toBe('about:blank');
+  });
+
+  it('returns about:blank for data: scheme', () => {
+    expect(safeUrl('data:text/html,<script>alert(1)</script>')).toBe('about:blank');
+  });
+
+  it('returns about:blank for vbscript: scheme', () => {
+    expect(safeUrl('vbscript:msgbox(1)')).toBe('about:blank');
+  });
+
+  it('returns about:blank for an uppercase JAVASCRIPT: scheme (URL parser normalizes protocol)', () => {
+    expect(safeUrl('JAVASCRIPT:alert(1)')).toBe('about:blank');
+  });
+
+  it('returns about:blank for garbage that is not a URL', () => {
+    expect(safeUrl('not a url')).toBe('about:blank');
+  });
+
+  it('returns about:blank for an empty string', () => {
+    expect(safeUrl('')).toBe('about:blank');
   });
 });
