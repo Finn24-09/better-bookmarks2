@@ -23,6 +23,25 @@ beforeEach(() => {
 // Password length policy — must match registration / change-password (12+).
 // Reset must NOT produce a password that fails the sign-up policy.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Portal mount — the modal must escape ancestor stacking contexts
+// (e.g. AuthPage's backdrop-blur card + animated overlay) by rendering
+// directly into document.body. Otherwise the sliding overlay paints on top.
+// ---------------------------------------------------------------------------
+describe('ResetPasswordModal · portal mount', () => {
+  it('renders the modal as a child of document.body, not the local container', () => {
+    const { container } = render(<ResetPasswordModal onClose={vi.fn()} />);
+    const modal = screen
+      .getByRole('heading', { name: /set new password/i })
+      .closest('.fixed');
+    expect(modal).toBeTruthy();
+    // Proves the modal portaled out of the rendering container...
+    expect(container.contains(modal)).toBe(false);
+    // ...and into document.body
+    expect(document.body.contains(modal!)).toBe(true);
+  });
+});
+
 describe('ResetPasswordModal · password length policy', () => {
   it('rejects an 11-character password with "At least 12 characters"', async () => {
     const user = userEvent.setup();

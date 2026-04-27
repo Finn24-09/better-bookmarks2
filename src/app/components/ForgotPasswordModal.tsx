@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import { X, Mail, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -39,7 +40,7 @@ export function ForgotPasswordModal({ onClose }: Props) {
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div className="relative w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-2xl shadow-purple-500/10">
         <button
@@ -109,6 +110,7 @@ export function ForgotPasswordModal({ onClose }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

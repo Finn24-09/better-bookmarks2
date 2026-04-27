@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import { Lock, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -52,7 +53,7 @@ export function ResetPasswordModal({ onClose }: Props) {
 
   const eyeBtn = "w-7 h-7 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors duration-300";
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div className="relative w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-2xl shadow-purple-500/10">
         <h2 className="text-xl font-medium text-white mb-4">Set new password</h2>
@@ -115,6 +116,7 @@ export function ResetPasswordModal({ onClose }: Props) {
           </button>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

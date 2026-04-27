@@ -194,9 +194,8 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
       <div className="flex gap-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
         <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <p className="text-xs text-amber-300/90 leading-relaxed">
-          <strong className="text-amber-300">Remember your password.</strong> Your bookmarks are
-          encrypted with a key derived from it. If you forget it, a password reset will permanently
-          delete all your bookmarks and tags — this cannot be undone.
+          <strong className="text-amber-300">Remember your password.</strong> It's the encryption
+          key for your data. Forgetting it means losing every bookmark and tag — permanently.
         </p>
       </div>
       <InputField

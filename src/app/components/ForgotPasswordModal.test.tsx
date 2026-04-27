@@ -21,6 +21,24 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+// ---------------------------------------------------------------------------
+// Portal mount — the modal must escape ancestor stacking contexts
+// (e.g. AuthPage's backdrop-blur card + animated overlay) by rendering
+// directly into document.body. Otherwise sibling animated layers can paint
+// on top despite the modal's z-50.
+// ---------------------------------------------------------------------------
+describe('ForgotPasswordModal · portal mount', () => {
+  it('renders the modal as a child of document.body, not the local container', () => {
+    const { container } = render(<ForgotPasswordModal onClose={vi.fn()} />);
+    const modal = screen
+      .getByRole('heading', { name: /reset password/i })
+      .closest('.fixed');
+    expect(modal).toBeTruthy();
+    expect(container.contains(modal)).toBe(false);
+    expect(document.body.contains(modal!)).toBe(true);
+  });
+});
+
 describe('ForgotPasswordModal', () => {
   it('renders the email input and submit button', () => {
     render(<ForgotPasswordModal onClose={vi.fn()} />);

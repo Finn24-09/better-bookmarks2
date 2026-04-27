@@ -122,6 +122,22 @@ describe('apiFetch', () => {
     expect(err.message).toBe('Authentication required. Please sign in.');
   });
 
+  it('relays "Invalid email or password" body message on 400 from /rpc/sign_in (S-2: 400 IS the user-facing channel)', async () => {
+    // Locks the contract: the SQL function must raise with an errcode that maps to
+    // HTTP 400 (e.g. check_violation → 23514) so the message reaches the user.
+    // If sign_in's errcode is changed to one that maps to 401/403, this test fails.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ message: 'Invalid email or password' }),
+    }));
+
+    const err = await apiFetch('/rpc/sign_in', { method: 'POST' }).catch((e) => e) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(400);
+    expect(err.message).toBe('Invalid email or password');
+  });
+
   it('throws ApiError with generic message for 401 on non-auth paths (no schema leakage)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,

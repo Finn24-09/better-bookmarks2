@@ -134,8 +134,13 @@ BEGIN
     AND auth.users.password = crypt(sign_in.password, auth.users.password);
 
   IF NOT FOUND THEN
-    -- Return same error for unknown email and wrong password (no enumeration)
-    RAISE EXCEPTION 'Invalid email or password' USING ERRCODE = 'invalid_password';
+    -- Return same error for unknown email and wrong password (no enumeration).
+    -- Use check_violation (SQLSTATE 23514 → HTTP 400) so PostgREST returns 400
+    -- and the frontend's auth-RPC body relay surfaces this message to the user.
+    -- Previously used invalid_password (28P01 → HTTP 403); api.ts intentionally
+    -- masks 401/403 with a generic "no permission" message to prevent schema
+    -- leakage, which hid this user-facing validation message.
+    RAISE EXCEPTION 'Invalid email or password' USING ERRCODE = 'check_violation';
   END IF;
 
   token := api._sign_jwt(found_user.id, found_user.email);

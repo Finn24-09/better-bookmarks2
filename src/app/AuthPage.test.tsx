@@ -35,6 +35,7 @@ vi.mock('../lib/crypto', () => ({
 import { signIn, signUp } from '../lib/auth';
 import { deriveKey } from '../lib/crypto';
 import { toast } from 'sonner';
+import { ApiError } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 
@@ -134,6 +135,35 @@ describe('AuthPage', () => {
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith('Invalid credentials'),
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Login form – bad-credentials toast surfaces the server message
+  // (regression: previously the SQL raised with errcode `invalid_password`
+  // → HTTP 403, which api.ts intentionally masks for security, so the toast
+  // showed "You do not have permission to perform this action." instead of
+  // the user-friendly "Invalid email or password.")
+  // -------------------------------------------------------------------------
+
+  it('shows "Invalid email or password" toast when signIn throws ApiError(400)', async () => {
+    vi.mocked(signIn).mockRejectedValue(new ApiError(400, 'Invalid email or password'));
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getAllByPlaceholderText('Email address')[0], 'bad@example.com');
+    await user.type(screen.getAllByPlaceholderText('Password')[0], 'wrongpass');
+    await user.click(screen.getAllByRole('button', { name: /^sign in$/i })[0]);
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Invalid email or password'),
+    );
+    expect(toast.error).not.toHaveBeenCalledWith(
+      'You do not have permission to perform this action.',
+    );
+    // Failed sign-in must not authenticate or navigate the user.
+    expect(deriveKey).not.toHaveBeenCalled();
+    expect(mockLogin).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -241,6 +271,29 @@ describe('AuthPage', () => {
   // -------------------------------------------------------------------------
   // Register form – password strength hints
   // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // Register form – data-loss warning copy is tight but still informative
+  // -------------------------------------------------------------------------
+
+  it('register form data-loss warning is concise and preserves security meaning', () => {
+    renderPage();
+
+    // The warning starts with the bold "Remember your password." lead-in.
+    // Grab the containing <p> so we get the full warning text (lead-in + body).
+    const lead = screen.getAllByText(/remember your password/i)[0];
+    const paragraph = lead.closest('p');
+    expect(paragraph).not.toBeNull();
+
+    const text = paragraph!.textContent ?? '';
+
+    // Tightness — must fit comfortably in the 280px desktop column.
+    expect(text.length).toBeLessThanOrEqual(160);
+
+    // Critical security facts must survive the trim.
+    expect(text).toMatch(/encryption|encrypted|key/i);
+    expect(text).toMatch(/delete|lose|losing|permanently/i);
+  });
 
   it('shows password strength hints in the register form after typing', async () => {
     const user = userEvent.setup();
