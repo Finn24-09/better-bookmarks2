@@ -100,4 +100,20 @@ describe('deleteConfirmationTemplate', () => {
     const out = deleteConfirmationTemplate(TOKEN);
     expect(out.text).toMatchSnapshot();
   });
+
+  // ── M-5: stripUnsafe must be a no-op on real generated tokens ────────────
+  // The display path strips characters; the compare path (hashToken) does
+  // not. If the strip ever started removing real-token bytes, the email
+  // would contain a token the server cannot validate. Guard against that
+  // by asserting the strip is identity on the actual generator output.
+  it('M-5: stripUnsafe is identity on crypto.randomBytes(32).toString("base64url") tokens', async () => {
+    const { generateToken } = await import('../tokenUtils.js');
+    for (let i = 0; i < 1000; i++) {
+      const tok = generateToken();
+      const out = deleteConfirmationTemplate(tok);
+      // The unmodified token must appear verbatim in both rendered surfaces.
+      expect(out.text).toContain(tok);
+      expect(out.html).toContain(tok);
+    }
+  });
 });
