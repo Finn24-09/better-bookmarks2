@@ -2,9 +2,14 @@ import { describe, it, expect, vi } from 'vitest';
 import { SignJWT } from 'jose';
 import { createSecretKey } from 'node:crypto';
 
-// Mock config before importing jwt
+// Mock config before importing jwt.
 vi.mock('./config.js', () => ({
-  config: { JWT_SECRET: 'a-test-secret-that-is-at-least-32-chars-long!' },
+  config: {
+    JWT_SECRET: 'a-test-secret-that-is-at-least-32-chars-long!',
+    JWT_AUDIENCE: 'email-svc',
+    JWT_ISSUER: undefined,
+    NODE_ENV: 'production',
+  },
 }));
 
 const { verifyJwt } = await import('./jwt.js');
@@ -16,6 +21,7 @@ async function makeToken(overrides: Record<string, unknown> = {}, expiredAgo = f
   const base = {
     sub: '00000000-0000-4000-8000-000000000001',
     role: 'app_user',
+    aud: 'email-svc',
     exp: expiredAgo
       ? Math.floor(Date.now() / 1000) - 3600
       : Math.floor(Date.now() / 1000) + 3600,
@@ -65,5 +71,25 @@ describe('verifyJwt', () => {
     const parts = ['eyJhbGciOiJub25lIn0', 'eyJzdWIiOiJ0ZXN0Iiwicm9sZSI6ImFwcF91c2VyIn0', ''];
     const fakeNone = parts.join('.');
     await expect(verifyJwt(`Bearer ${fakeNone}`)).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  // ── H-4: audience pinning ─────────────────────────────────────────────────
+  // Tokens minted by PostgREST (or any other service sharing the JWT secret)
+  // for a different audience MUST be rejected. Without this, a JWT meant for
+  // PostgREST is silently accepted by the email service.
+  it('H-4: rejects a token with no aud claim (production)', async () => {
+    const token = await makeToken({ aud: undefined });
+    await expect(verifyJwt(`Bearer ${token}`)).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it('H-4: rejects a token with wrong aud (e.g. PostgREST)', async () => {
+    const token = await makeToken({ aud: 'postgrest' });
+    await expect(verifyJwt(`Bearer ${token}`)).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it('H-4: accepts a token with correct aud=email-svc', async () => {
+    const token = await makeToken({ aud: 'email-svc' });
+    const result = await verifyJwt(`Bearer ${token}`);
+    expect(result.sub).toBe('00000000-0000-4000-8000-000000000001');
   });
 });

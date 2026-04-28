@@ -4,15 +4,33 @@ import { config } from './config.js';
 
 const secretKey = createSecretKey(Buffer.from(config.JWT_SECRET, 'utf-8'));
 
+// H-4: Audience and issuer pinning.
+//
+// The JWT secret is shared with PostgREST. Without an `aud` check, any
+// token PostgREST signs (e.g., a session token for an unrelated frontend
+// call) can be replayed against this service. The token-issuance side
+// (api._sign_jwt in docker/db/init/11_jwt_audience.sql) sets
+// `aud = 'email-svc'` on every minted JWT and verification here is
+// unconditionally strict — any token without the correct audience is
+// rejected.
+//
+// Issuer pinning is optional — only enforced when JWT_ISSUER is set,
+// since the issuer name may not yet be stable across environments.
+
 export async function verifyJwt(authHeader: string | undefined): Promise<{ sub: string }> {
   if (!authHeader?.startsWith('Bearer ')) throw unauth();
   const token = authHeader.slice(7);
   let payload: Record<string, unknown>;
   try {
-    ({ payload } = await jwtVerify(token, secretKey, {
+    const verifyOptions: Parameters<typeof jwtVerify>[2] = {
       algorithms: ['HS256'],
       requiredClaims: ['sub', 'role', 'exp'],
-    }));
+      audience: config.JWT_AUDIENCE,
+    };
+    if (config.JWT_ISSUER) {
+      verifyOptions.issuer = config.JWT_ISSUER;
+    }
+    ({ payload } = await jwtVerify(token, secretKey, verifyOptions));
   } catch {
     throw unauth();
   }
