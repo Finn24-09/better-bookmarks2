@@ -37,6 +37,26 @@ updates:
           - "vitest"
     labels:
       - "dependencies"
+      - "webapp"
     # Security advisories will open PRs immediately, overriding the weekly schedule.
     # 10 PRs open at once is enough for a weekly batch + any emergency security fixes.
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "npm"
+    directory: "/services/email"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Berlin"
+    groups:
+      # Patch + minor bundled weekly. Majors (fastify, pg, jose, nodemailer) come as
+      # individual PRs — they touch the auth/mail boundary and deserve isolated review.
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+    labels:
+      - "dependencies"
+      - "email-service"
     open-pull-requests-limit: 10
