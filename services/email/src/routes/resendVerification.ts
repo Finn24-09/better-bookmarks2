@@ -4,6 +4,7 @@ import { generateToken, hashToken, TTL } from '../tokenUtils.js';
 import { sendMail } from '../mailer.js';
 import { verifyEmailTemplate } from '../templates/verifyEmail.js';
 import { verifyJwt } from '../jwt.js';
+import { rateLimitFor } from '../rateLimit.js';
 
 // Per-user resend cooldown. Kept in sync with the EmailVerificationBanner
 // constant (COOLDOWN_MS) so the client can never request a resend before the
@@ -19,7 +20,7 @@ const COOLDOWN_SECONDS = 60;
 const DAILY_CEILING = 10;
 
 export const resendVerificationRoute: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/resend-verification', async (req, reply) => {
+  fastify.post('/resend-verification', rateLimitFor('/resend-verification'), async (req, reply) => {
     let userId: string;
     try {
       ({ sub: userId } = await verifyJwt(req.headers.authorization));

@@ -4,6 +4,7 @@ import { pool } from '../db.js';
 import { generateToken, hashToken, TTL } from '../tokenUtils.js';
 import { sendMail } from '../mailer.js';
 import { resetPasswordTemplate } from '../templates/resetPassword.js';
+import { rateLimitFor } from '../rateLimit.js';
 
 const bodySchema = z.object({
   email: z.string().email().max(255).transform(v => v.replace(/[\x00-\x1f\x7f]/g, '')),
@@ -12,7 +13,7 @@ const bodySchema = z.object({
 const RESPONSE_FLOOR_MS = 800;
 
 export const requestResetRoute: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/request-reset', async (req, reply) => {
+  fastify.post('/request-reset', rateLimitFor('/request-reset'), async (req, reply) => {
     const start = Date.now();
 
     const parsed = bodySchema.safeParse(req.body);

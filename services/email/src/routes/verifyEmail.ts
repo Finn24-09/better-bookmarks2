@@ -2,9 +2,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import { pool } from '../db.js';
 import { hashToken } from '../tokenUtils.js';
 import { config } from '../config.js';
+import { rateLimitFor } from '../rateLimit.js';
 
 export const verifyEmailRoute: FastifyPluginAsync = async (fastify) => {
-  fastify.get('/verify-email', async (req, reply) => {
+  fastify.get('/verify-email', rateLimitFor('/verify-email'), async (req, reply) => {
     const token = (req.query as Record<string, string>)['token'] ?? '';
     // Hash fragment with embedded query string — parsed by App.tsx hash handler. The `?` is part of the fragment, not a real query string.
     if (!token || token.length > 256) {

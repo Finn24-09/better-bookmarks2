@@ -2,12 +2,13 @@ import type { FastifyPluginAsync } from 'fastify';
 import { pool } from '../db.js';
 import { hashToken, TTL } from '../tokenUtils.js';
 import { config } from '../config.js';
+import { rateLimitFor } from '../rateLimit.js';
 
 export const resetPasswordRoute: FastifyPluginAsync = async (fastify) => {
   // GET /reset-password?token=xxx
   // Validates token (does NOT redeem it), sets an HttpOnly session cookie,
   // then redirects to /#reset-password (no token in redirect URL — H-1, H-3).
-  fastify.get('/reset-password', async (req, reply) => {
+  fastify.get('/reset-password', rateLimitFor('/reset-password'), async (req, reply) => {
     const token = (req.query as Record<string, string>)['token'] ?? '';
     // Hash fragment with embedded query string — parsed by App.tsx hash handler. The `?` is part of the fragment, not a real query string.
     if (!token || token.length > 256) {

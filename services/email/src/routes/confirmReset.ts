@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../db.js';
 import { hashToken } from '../tokenUtils.js';
 import { config } from '../config.js';
+import { rateLimitFor } from '../rateLimit.js';
 
 // S-7: Hashing happens inside auth.reset_password_destroy_data via
 // crypt(p_new_pw, gen_salt('bf', 13)) so all account hashes share the
@@ -13,7 +14,7 @@ const bodySchema = z.object({
 });
 
 export const confirmResetRoute: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/confirm-reset', async (req, reply) => {
+  fastify.post('/confirm-reset', rateLimitFor('/confirm-reset'), async (req, reply) => {
     const cookieToken = req.cookies?.['reset_token'];
     if (!cookieToken || cookieToken.length > 256) {
       return reply.status(400).send({ error: 'Invalid request' });

@@ -4,9 +4,10 @@ import { generateToken, hashToken, TTL } from '../tokenUtils.js';
 import { sendMail } from '../mailer.js';
 import { deleteConfirmationTemplate } from '../templates/deleteConfirmation.js';
 import { verifyJwt } from '../jwt.js';
+import { rateLimitFor } from '../rateLimit.js';
 
 export const requestDeleteRoute: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/request-delete', async (req, reply) => {
+  fastify.post('/request-delete', rateLimitFor('/request-delete'), async (req, reply) => {
     let userId: string;
     try {
       ({ sub: userId } = await verifyJwt(req.headers.authorization));

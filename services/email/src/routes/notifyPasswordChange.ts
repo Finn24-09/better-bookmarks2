@@ -3,11 +3,21 @@ import { pool } from '../db.js';
 import { sendMail } from '../mailer.js';
 import { passwordChangedTemplate } from '../templates/passwordChanged.js';
 import { verifyJwt } from '../jwt.js';
+import { rateLimitFor } from '../rateLimit.js';
+
+// TODO(security M-6): /notify-password-change currently trusts the JWT alone
+// to assert that a password rotation actually happened. A stolen JWT is a
+// phishing-pretext primitive — an attacker can replay the call to inject a
+// "your password was changed" email into the legitimate user's inbox.
+// The proper fix is a coordinated change with the auth service: have
+// PostgREST mint a short-lived, single-use signed claim on actual password
+// rotation that this route verifies before sending. Out of scope for this
+// PR — the rate limiter below at least bounds the abuse rate to 10 / 5min.
 
 const COOLDOWN_MINUTES = 5;
 
 export const notifyPasswordChangeRoute: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/notify-password-change', async (req, reply) => {
+  fastify.post('/notify-password-change', rateLimitFor('/notify-password-change'), async (req, reply) => {
     let userId: string;
     try {
       ({ sub: userId } = await verifyJwt(req.headers.authorization));

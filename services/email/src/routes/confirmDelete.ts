@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../db.js';
 import { hashToken } from '../tokenUtils.js';
 import { verifyJwt } from '../jwt.js';
+import { rateLimitFor } from '../rateLimit.js';
 
 const bodySchema = z.object({
   token: z.string().min(1).max(256),
@@ -10,7 +11,7 @@ const bodySchema = z.object({
 });
 
 export const confirmDeleteRoute: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/confirm-delete', async (req, reply) => {
+  fastify.post('/confirm-delete', rateLimitFor('/confirm-delete'), async (req, reply) => {
     let userId: string;
     try {
       ({ sub: userId } = await verifyJwt(req.headers.authorization));
