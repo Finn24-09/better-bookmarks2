@@ -154,7 +154,7 @@ ${opts.bodySlot}              <table role="presentation" width="100%" cellpaddin
                 <tr>
                   <td class="px" style="padding:20px 48px 36px 48px;font-family:Helvetica,Arial,sans-serif;">
                     <p class="text-faint" style="margin:0;font-size:12px;line-height:18px;color:#c4b5e0 !important;">
-                      Didn't expect this email? You can safely ignore it unless it's a password change - your account is unchanged unless you act on the contents above.
+                      Didn't expect this email? You can safely ignore it — your account is unchanged unless you act on the contents above.
                     </p>
                   </td>
                 </tr>
