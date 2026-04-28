@@ -121,4 +121,50 @@ describe('POST /request-reset', () => {
     expect(mockPoolQuery).not.toHaveBeenCalled();
     expect(mockSendMail).not.toHaveBeenCalled();
   });
+
+  // ── H-1: response time is bounded by floor regardless of SMTP latency ────
+  // SMTP RTT must NOT leak past the response. sendMail must be dispatched
+  // asynchronously (fire-and-forget); wall-clock response time stays close
+  // to the 800 ms floor even if SMTP takes seconds. Without this property
+  // an attacker can statistically distinguish "user exists" (real SMTP RTT
+  // 200–2000 ms) from "user doesn't exist" (no SMTP) — a timing oracle for
+  // email enumeration.
+  it('H-1: response time bounded by floor even when sendMail is slow', async () => {
+    mockPoolQuery
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 'u1', email: 'alice@example.com' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    // Simulate a slow SMTP RTT — would leak as a timing oracle if sendMail
+    // was awaited inline.
+    let mailResolve: (() => void) | null = null;
+    const mailPromise = new Promise<void>((resolve) => { mailResolve = resolve; });
+    mockSendMail.mockImplementationOnce(async () => {
+      await mailPromise;
+    });
+
+    const start = Date.now();
+    const res = await makeApp().inject({
+      method: 'POST',
+      url: '/request-reset',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'alice@example.com' }),
+    });
+    const elapsed = Date.now() - start;
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    // Floor is 800ms; response must complete near the floor (not held up by SMTP).
+    // The test would deadlock here if sendMail was awaited (mailPromise never resolves).
+    expect(elapsed).toBeGreaterThanOrEqual(780);
+    expect(elapsed).toBeLessThan(2000);
+
+    // Verify the route DID actually dispatch sendMail (fire-and-forget).
+    expect(mockSendMail).toHaveBeenCalledTimes(1);
+    // Verify the DB pre-insert and user lookup happened.
+    expect(mockPoolQuery).toHaveBeenCalledTimes(2);
+
+    // Release the slow SMTP send so the test cleans up.
+    mailResolve!();
+    await mailPromise;
+  });
 });

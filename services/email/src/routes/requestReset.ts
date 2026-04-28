@@ -39,12 +39,20 @@ export const requestResetRoute: FastifyPluginAsync = async (fastify) => {
             'SELECT auth.upsert_email_token($1, $2, $3, $4, $5)',
             [user.id, hash, 'password_reset', TTL.PASSWORD_RESET, req.ip || null],
           );
+          // H-1: dispatch SMTP asynchronously (fire-and-forget). Awaiting
+          // sendMail inside the request lifecycle leaks SMTP RTT into the
+          // wall-clock response time, defeating the timing-floor and
+          // creating a statistical timing oracle for email enumeration.
+          // The token row is already committed; the email itself is best-
+          // effort. Failures are logged but never surface to the caller.
           const tmpl = resetPasswordTemplate(raw);
-          await sendMail({ to: user.email, ...tmpl });
+          void sendMail({ to: user.email, ...tmpl }).catch((err: unknown) => {
+            req.log.error({ err }, 'requestReset: send failed');
+          });
         } catch (err: unknown) {
           // 23505 = concurrent insert race — silently ignore (M-1)
           if ((err as { code?: string }).code !== '23505') {
-            req.log.error({ err }, 'requestReset: send failed');
+            req.log.error({ err }, 'requestReset: token insert failed');
           }
         }
       }

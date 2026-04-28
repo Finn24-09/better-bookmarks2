@@ -48,7 +48,15 @@ export const confirmResetRoute: FastifyPluginAsync = async (fastify) => {
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
-      req.log.error({ err }, 'confirmReset: transaction failed');
+      // S-2: Sanitise the logged error. auth.reset_password_destroy_data
+      // takes the plaintext newPassword as a bound parameter, and
+      // node-postgres MAY attach err.parameters on some failure paths.
+      // Fastify's default pino serializer would render whatever is on
+      // err — strip to known safe fields only.
+      req.log.error(
+        { err: { message: (err as Error).message, code: (err as { code?: string }).code } },
+        'confirmReset: transaction failed',
+      );
       return reply.status(500).send({ error: 'Internal error' });
     } finally {
       client.release();

@@ -40,20 +40,23 @@ function makeApp() {
 // ── helpers ────────────────────────────────────────────────────────────────
 
 function setupRedeemSuccess(userId = VALID_USER) {
-  // M-1: BEGIN → redeem → delete_account_with_password (TRUE) → COMMIT,
-  // all via client.query (single transaction).
+  // M-2: BEGIN → preflight token-owner SELECT → redeem → delete → COMMIT,
+  // all via client.query (single transaction). The preflight step is a
+  // SELECT-only check that the token's user_id matches the JWT sub
+  // BEFORE calling redeem_email_token (which would consume the token).
   mockQuery
     .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+    .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: userId }] })           // preflight owner check
     .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: userId }] })           // redeem
-    .mockResolvedValueOnce({ rows: [{ delete_account_with_password: true }] })    // delete (correct pw)
+    .mockResolvedValueOnce({ rowCount: 1, rows: [{ delete_account_with_password: true }] })    // delete (correct pw)
     .mockResolvedValueOnce({ rows: [] });                                          // COMMIT
 }
 
 function setupRedeemEmpty() {
   mockQuery
-    .mockResolvedValueOnce({ rows: [] })        // BEGIN
-    .mockResolvedValueOnce({ rowCount: 0, rows: [] }) // redeem: no match
-    .mockResolvedValueOnce({ rows: [] });        // ROLLBACK
+    .mockResolvedValueOnce({ rows: [] })                  // BEGIN
+    .mockResolvedValueOnce({ rowCount: 0, rows: [] })     // preflight: no token found
+    .mockResolvedValueOnce({ rows: [] });                 // ROLLBACK
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────
@@ -94,10 +97,15 @@ describe('POST /confirm-delete', () => {
   // M-1: After moving password verification into the same transaction as
   // token redemption, a wrong password must ROLLBACK (not COMMIT) — so the
   // token row stays unused and the legitimate user can retry with it.
-  it('TC-2 (M-1): valid token + wrong password → 400 "Invalid password", redemption ROLLED BACK (token NOT consumed)', async () => {
-    // Sequence: BEGIN → redeem → delete_account (returns false) → ROLLBACK
+  it('TC-2 (M-1, M-2): valid token + wrong password → 400 "Invalid credentials", redemption ROLLED BACK (token NOT consumed)', async () => {
+    // M-2 sequence: BEGIN → preflight → redeem → delete (false) → ROLLBACK.
+    // M-2 also collapses the error messages: wrong-password and bad-token
+    // both return the same generic "Invalid credentials" string so the
+    // attacker cannot use the response to correlate JWT identity with
+    // token ownership.
     mockQuery
       .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // preflight owner check
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // redeem
       .mockResolvedValueOnce({ rows: [{ delete_account_with_password: false }] })   // wrong password
       .mockResolvedValueOnce({ rows: [] });                                          // ROLLBACK
@@ -110,7 +118,7 @@ describe('POST /confirm-delete', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: 'Invalid password' });
+    expect(res.json()).toEqual({ error: 'Invalid credentials' });
     const sql = mockQuery.mock.calls.map((c) => String(c[0]));
     // M-1: Token redemption is ROLLED BACK on wrong password — UPDATE used_at
     // never commits, so the token can be reused by the legitimate owner.
@@ -132,6 +140,7 @@ describe('POST /confirm-delete', () => {
     // Attempt 1 — wrong password, token NOT consumed (ROLLBACK).
     mockQuery
       .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // preflight
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // redeem
       .mockResolvedValueOnce({ rows: [{ delete_account_with_password: false }] })   // wrong password
       .mockResolvedValueOnce({ rows: [] });                                          // ROLLBACK
@@ -150,8 +159,9 @@ describe('POST /confirm-delete', () => {
     mockConnect.mockResolvedValue({ query: mockQuery, release: mockRelease });
     mockQuery
       .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // preflight
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // redeem
-      .mockResolvedValueOnce({ rows: [{ delete_account_with_password: true }] })    // correct
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ delete_account_with_password: true }] })    // correct
       .mockResolvedValueOnce({ rows: [] });                                          // COMMIT
 
     const res2 = await app.inject({
@@ -166,7 +176,7 @@ describe('POST /confirm-delete', () => {
   });
 
   // TC-3 ──────────────────────────────────────────────────────────────────
-  it('TC-3: invalid/expired token → 400 "Invalid or expired token", delete never called', async () => {
+  it('TC-3 (M-2): invalid/expired token → 400 "Invalid credentials", delete never called', async () => {
     setupRedeemEmpty();
 
     const res = await makeApp().inject({
@@ -177,20 +187,28 @@ describe('POST /confirm-delete', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: 'Invalid or expired token' });
+    // M-2: collapsed error message for all bad-token / wrong-password cases.
+    expect(res.json()).toEqual({ error: 'Invalid credentials' });
     const sql = mockQuery.mock.calls.map((c) => String(c[0]));
     expect(sql.some(s => s.includes('ROLLBACK'))).toBe(true);
+    // redeem_email_token MUST NOT be called when preflight finds nothing.
+    expect(sql.some(s => s.includes('redeem_email_token'))).toBe(false);
     expect(mockPoolQuery).not.toHaveBeenCalled();
     expect(mockRelease).toHaveBeenCalledOnce();
   });
 
   // TC-4 ──────────────────────────────────────────────────────────────────
-  it('TC-4: token belongs to different user → 400 "Invalid or expired token"', async () => {
-    // Redeem returns OTHER_USER but JWT sub is VALID_USER
+  it('TC-4 (M-2): cross-user token → 400 "Invalid credentials", token NOT consumed', async () => {
+    // M-2: Preflight SELECT finds the token but its user_id is OTHER_USER.
+    // We MUST NOT call redeem_email_token in this branch — it would mark
+    // the legitimate owner's token used_at and lock them out. The error
+    // string is the same generic "Invalid credentials" used for all other
+    // failure modes so the JWT-holder cannot use the response to confirm
+    // that the token belongs to someone else.
     mockQuery
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: OTHER_USER }] })
-      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+      .mockResolvedValueOnce({ rows: [] })                                       // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: OTHER_USER }] })    // preflight: belongs to other user
+      .mockResolvedValueOnce({ rows: [] });                                       // ROLLBACK
 
     const res = await makeApp().inject({
       method: 'POST',
@@ -200,7 +218,14 @@ describe('POST /confirm-delete', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: 'Invalid or expired token' });
+    expect(res.json()).toEqual({ error: 'Invalid credentials' });
+    const sql = mockQuery.mock.calls.map((c) => String(c[0]));
+    // The redeem function must NEVER be called when the token belongs to
+    // another user — we must not consume it on a cross-user attempt.
+    expect(sql.some(s => /redeem_email_token/.test(s))).toBe(false);
+    expect(sql.some(s => s.includes('delete_account_with_password'))).toBe(false);
+    expect(sql.some(s => s.includes('ROLLBACK'))).toBe(true);
+    expect(sql.some(s => s.includes('COMMIT'))).toBe(false);
     expect(mockPoolQuery).not.toHaveBeenCalled();
     expect(mockRelease).toHaveBeenCalledOnce();
   });
@@ -248,7 +273,7 @@ describe('POST /confirm-delete', () => {
   });
 
   // TC-8 ──────────────────────────────────────────────────────────────────
-  it('TC-8: double-redemption → second call returns 400 "Invalid or expired token"', async () => {
+  it('TC-8 (M-2): double-redemption → second call returns 400 "Invalid credentials"', async () => {
     const app = makeApp();
 
     // First call: succeeds
@@ -261,7 +286,7 @@ describe('POST /confirm-delete', () => {
       body: JSON.stringify({ token: 'raw-token', password: 'CorrectPass1!' }),
     });
 
-    // Reset and simulate token already used (redeem returns 0 rows)
+    // Reset and simulate token already used (preflight returns 0 rows)
     vi.clearAllMocks();
     mockConnect.mockResolvedValue({ query: mockQuery, release: mockRelease });
     setupRedeemEmpty();
@@ -274,14 +299,65 @@ describe('POST /confirm-delete', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: 'Invalid or expired token' });
+    expect(res.json()).toEqual({ error: 'Invalid credentials' });
+  });
+
+  // TC-S1 ─────────────────────────────────────────────────────────────────
+  // S-1: If auth.delete_account_with_password ever returns zero rows or
+  // the column comes back undefined, we MUST NOT throw a TypeError that
+  // surfaces as 500 — that is a fingerprintable difference from the
+  // generic 400 path. ROLLBACK and return the same generic 400.
+  it('TC-S1: delete_account_with_password returns [] → 400 generic (not 500)', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // preflight
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // redeem
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })                              // delete returned no rows
+      .mockResolvedValueOnce({ rows: [] });                                          // ROLLBACK
+
+    const res = await makeApp().inject({
+      method: 'POST',
+      url: '/confirm-delete',
+      headers: { authorization: `Bearer ${await makeToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'raw-token', password: 'CorrectPass1!' }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'Invalid credentials' });
+    const sql = mockQuery.mock.calls.map((c) => String(c[0]));
+    expect(sql.some(s => s.includes('ROLLBACK'))).toBe(true);
+    expect(sql.some(s => s.includes('COMMIT'))).toBe(false);
+    expect(mockPoolQuery).not.toHaveBeenCalled();
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  it('TC-S1b: delete_account_with_password returns row with undefined column → 400 generic (not 500)', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })                                          // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // preflight
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ user_id: VALID_USER }] })       // redeem
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{}] })                            // unexpected shape
+      .mockResolvedValueOnce({ rows: [] });                                          // ROLLBACK
+
+    const res = await makeApp().inject({
+      method: 'POST',
+      url: '/confirm-delete',
+      headers: { authorization: `Bearer ${await makeToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'raw-token', password: 'CorrectPass1!' }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'Invalid credentials' });
+    const sql = mockQuery.mock.calls.map((c) => String(c[0]));
+    expect(sql.some(s => s.includes('ROLLBACK'))).toBe(true);
+    expect(sql.some(s => s.includes('COMMIT'))).toBe(false);
   });
 
   // TC-9 ──────────────────────────────────────────────────────────────────
-  it('TC-9: DB throws during redeem → 500 "Internal error", client.release() called', async () => {
+  it('TC-9: DB throws during preflight → 500 "Internal error", client.release() called', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [] })             // BEGIN
-      .mockRejectedValueOnce(new Error('connection reset')) // redeem throws
+      .mockRejectedValueOnce(new Error('connection reset')) // preflight throws
       .mockResolvedValueOnce({ rows: [] });             // ROLLBACK (via .catch)
 
     const res = await makeApp().inject({
