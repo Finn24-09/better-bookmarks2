@@ -7,7 +7,7 @@ import { resetPasswordTemplate } from '../templates/resetPassword.js';
 import { rateLimitFor } from '../rateLimit.js';
 
 const bodySchema = z.object({
-  email: z.string().email().max(255).transform(v => v.replace(/[\x00-\x1f\x7f]/g, '')),
+  email: z.email().max(255).transform(v => v.replace(/[\x00-\x1f\x7f]/g, '')),
 });
 
 const RESPONSE_FLOOR_MS = 800;
