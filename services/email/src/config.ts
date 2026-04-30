@@ -28,11 +28,15 @@ const envSchema = z.object({
   JWT_ISSUER:                z.string().min(1).optional(),
   SMTP_HOST:                 z.string().min(1),
   SMTP_PORT:                 z.coerce.number().int().positive().default(587),
-  SMTP_SECURE:               z.string().transform(v => v === 'true').default('false'),
+  // zod 4: .default() must match the schema's *output* type, so the
+  // string default is applied before the boolean transform. Runtime
+  // semantics are identical to the pre-zod-4 .transform().default() form.
+  SMTP_SECURE:               z.string().default('false').transform(v => v === 'true'),
   // Defaults to true; set SMTP_REQUIRE_TLS=false ONLY for local dev pointed
   // at MailHog / Mailpit (which don't speak STARTTLS on port 1025).
   // Disabling in production is rejected at startup — see post-parse check.
-  SMTP_REQUIRE_TLS:          z.string().transform(v => v !== 'false').default('true'),
+  // (Same zod 4 ordering rule as SMTP_SECURE above.)
+  SMTP_REQUIRE_TLS:          z.string().default('true').transform(v => v !== 'false'),
   SMTP_USER:                 z.string().min(1),
   SMTP_PASS:                 z.string().min(1),
   SMTP_FROM:                 z.string().min(1),
