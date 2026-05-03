@@ -24,6 +24,13 @@ const fastify = Fastify({
   // the trust boundary. Adjust if the deployment puts more reverse
   // proxies in front of this service.
   trustProxy: 1,
+  // SEC-014: cap inbound bodies at 64 KB. Nginx already sets
+  // client_max_body_size 2M, but a defence-in-depth Fastify limit means
+  // that if Nginx is bypassed (direct port-forward in dev, future ingress
+  // topology change) a malformed request body cannot exhaust memory. The
+  // largest legitimate body is /confirm-delete with token+password ≤
+  // 384 bytes, so 64 KB is two orders of magnitude above the ceiling.
+  bodyLimit: 64 * 1024,
 });
 
 await fastify.register(cookie, { secret: config.COOKIE_SECRET });

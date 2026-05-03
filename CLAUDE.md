@@ -50,7 +50,7 @@ npm run test:watch  # watch mode during development
 src/
 ├── main.tsx                          # React 19 entry; mounts AuthProvider + router
 ├── app/
-│   ├── router.tsx                    # Two routes: / (App) and /auth (AuthPage)
+│   ├── router.tsx                    # Two routes: / (App) and /login (AuthPage)
 │   ├── App.tsx                       # Root layout: search/filter state, infinite scroll, bookmark grid
 │   ├── AuthPage.tsx                  # Animated sign in / sign up (desktop overlay, mobile tabs)
 │   ├── contexts/AuthContext.tsx      # In-memory auth state: token, userId, email, cryptoKey
@@ -102,7 +102,9 @@ The frontend talks to these PostgREST-exposed resources:
 | `/rpc/sign_in` | POST | Returns `{ token, user_id }` |
 | `/rpc/sign_up` | POST | Returns `{ token, user_id }` |
 | `/rpc/change_password` | POST | Call only after all re-encryption is done |
-| `/rpc/delete_account` | POST | Hard delete; password-confirmed |
+| `/rpc/rotation_status` | POST | Returns `{ key_version, has_stale_records }` — called on every login |
+| `/api/email/request-delete` | POST | Sends a confirmation email with a 15-min token |
+| `/api/email/confirm-delete` | POST | Token + password confirmed; SECURITY DEFINER cascade delete |
 
 Bookmark listing always reads from `bookmarks_with_tags`, not `bookmarks` directly.
 
