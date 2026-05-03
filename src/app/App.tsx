@@ -21,7 +21,7 @@ import type { Bookmark } from "../lib/bookmarks";
 export default function App() {
   const { partialRotation } = useAuth();
   if (partialRotation !== null) {
-    return <RecoveryModal keyVersion={partialRotation.keyVersion} />;
+    return <RecoveryModal />;
   }
   return <AppContent />;
 }

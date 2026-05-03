@@ -10,16 +10,12 @@ import { reencryptThumbnailToBody } from "../../lib/thumbnails";
 import { apiFetch } from "../../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 
-interface RecoveryModalProps {
-  keyVersion: number;
-}
-
 interface FormFields {
   currentPassword: string;
   newPassword: string;
 }
 
-export function RecoveryModal({ keyVersion: _keyVersion }: RecoveryModalProps) {
+export function RecoveryModal() {
   const { email, cryptoKey, updateKey, clearPartialRotation } = useAuth();
   const isRecoveringRef = useRef(false);
 

@@ -75,6 +75,45 @@ describe('tags', () => {
     expect(tag.name).toBe('design');
   });
 
+  it('createTag returns keyVersion from the server representation row (CR-001)', async () => {
+    // Server returns the new tag with key_version set (PostgREST default 1, or rotated value).
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => [{
+        id: 'tag-kv',
+        user_id: USER_ID,
+        name_enc: 'x',
+        name_hmac: 'y',
+        created_at: '',
+        key_version: 7,
+      }],
+    });
+
+    const tag = await createTag('work', USER_ID, key);
+    // Strict equality on the number, not shape equality — the bug class
+    // is "keyVersion is undefined-but-typed-as-number".
+    expect(tag.keyVersion).toBe(7);
+  });
+
+  it('createTag falls back to keyVersion 1 if server omits key_version', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => [{
+        id: 'tag-default',
+        user_id: USER_ID,
+        name_enc: 'x',
+        name_hmac: 'y',
+        created_at: '',
+        // key_version omitted
+      }],
+    });
+
+    const tag = await createTag('work', USER_ID, key);
+    expect(tag.keyVersion).toBe(1);
+  });
+
   // -------------------------------------------------------------------------
   // setBookmarkTags — diff logic
   // -------------------------------------------------------------------------

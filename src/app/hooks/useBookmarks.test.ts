@@ -153,6 +153,28 @@ describe('useBookmarks', () => {
     expect(result.current.hasMore).toBe(false);
   });
 
+  it('hasMore is false and error is set when loadMore fails (CR-010)', async () => {
+    // Initial page: 21 items so hasMore is true.
+    // Then loadMore rejects — we must NOT leave hasMore=true or the
+    // IntersectionObserver will retry on every wheel event.
+    vi.mocked(getBookmarks)
+      .mockResolvedValueOnce(makeBookmarks(21))
+      .mockRejectedValueOnce(new Error('loadMore network blip'));
+
+    const { result } = renderHook(() =>
+      useBookmarks({ search: '', selectedTagId: null }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasMore).toBe(true);
+
+    await act(async () => { result.current.loadMore(); });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.hasMore).toBe(false);
+    expect(result.current.error).toBe('loadMore network blip');
+  });
+
   // -------------------------------------------------------------------------
   // Filtered mode (search or tag)
   // -------------------------------------------------------------------------

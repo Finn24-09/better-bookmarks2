@@ -124,8 +124,7 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
   useEffect(() => {
     if (!cryptoKey) return;
     load(cryptoKey, isFiltered);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cryptoKey, isFiltered]);
+  }, [cryptoKey, isFiltered, load]);
 
   const refresh = useCallback(() => {
     if (!cryptoKey) return;
@@ -142,8 +141,10 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
       setAllBookmarks((prev) => [...prev, ...resolved]);
       setOffset((o) => o + resolved.length);
       setHasMore(page.length > PAGE_SIZE);
-    } catch {
-      // leave state as-is
+    } catch (e) {
+      // Stop the IntersectionObserver from retrying forever (CR-010).
+      setHasMore(false);
+      setError(e instanceof Error ? e.message : 'Failed to load more bookmarks');
     } finally {
       setIsLoading(false);
     }
