@@ -56,7 +56,7 @@ export async function createTag(name: string, userId: string, key: CryptoKey): P
     body: JSON.stringify({ user_id: userId, name_enc, name_hmac }),
   });
 
-  return { id: rows[0].id, name };
+  return { id: rows[0].id, name, keyVersion: rows[0].key_version ?? 1 };
 }
 
 // ---------------------------------------------------------------------------

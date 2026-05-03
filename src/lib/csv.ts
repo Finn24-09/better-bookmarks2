@@ -8,6 +8,8 @@
 //  - Row and file-size limits prevent memory exhaustion.
 // =============================================================================
 
+import { parseHttpUrl } from './url';
+
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_ROWS = 500;
 
@@ -51,7 +53,10 @@ export function validateCsvFile(file: File): void {
 // RFC 4180 character-by-character CSV tokeniser
 // ---------------------------------------------------------------------------
 
-function tokeniseCsv(text: string): string[][] {
+function tokeniseCsv(rawText: string): string[][] {
+  // Normalise CRLF and bare-CR line endings (Classic Mac OS) to LF so the
+  // tokenizer only has to handle one delimiter shape. (CR-026)
+  const text = rawText.replace(/\r\n?/g, '\n');
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -83,12 +88,6 @@ function tokeniseCsv(text: string): string[][] {
         row.push(field.trim());
         field = '';
         i++;
-      } else if (ch === '\r' && text[i + 1] === '\n') {
-        row.push(field.trim());
-        if (row.some((f) => f !== '')) rows.push(row);
-        row = [];
-        field = '';
-        i += 2;
       } else if (ch === '\n') {
         row.push(field.trim());
         if (row.some((f) => f !== '')) rows.push(row);
@@ -110,17 +109,20 @@ function tokeniseCsv(text: string): string[][] {
 }
 
 // ---------------------------------------------------------------------------
-// URL helper — returns null for anything that isn't http/https
+// Helpers
 // ---------------------------------------------------------------------------
 
-function parseHttpUrl(raw: string): string | null {
-  if (!raw) return null;
-  try {
-    const u = new URL(raw);
-    return u.protocol === 'http:' || u.protocol === 'https:' ? raw : null;
-  } catch {
-    return null;
+/** Inverse of export.ts/csvSanitize: strip a leading single quote when it
+ *  is followed by a formula-injection trigger character. Round-trip safe;
+ *  apostrophe-prefixed titles like "'Twas the night" pass through unchanged.
+ *  (M-08, mirror of the export-side single-quote prefix) */
+function stripFormulaPrefix(value: string): string {
+  if (value.length < 2 || value[0] !== "'") return value;
+  const next = value[1];
+  if (next === '=' || next === '+' || next === '-' || next === '@') {
+    return value.slice(1);
   }
+  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +166,7 @@ export function parseCsvText(text: string): CsvParseResult {
   dataRows.forEach((cols, idx) => {
     const rowNumber = idx + 2; // 1-based, accounting for header
 
-    const title = cols[titleIdx] ?? '';
+    const title = stripFormulaPrefix(cols[titleIdx] ?? '');
     const url = cols[urlIdx] ?? '';
 
     if (!title) {

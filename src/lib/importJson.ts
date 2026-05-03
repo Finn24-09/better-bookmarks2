@@ -10,6 +10,8 @@
 //  - Bookmark count is capped at MAX_BOOKMARKS.
 // =============================================================================
 
+import { parseHttpUrl } from './url';
+
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB — large enough for full thumbnail export
 const MAX_BOOKMARKS = 5000;
 const MAX_TITLE_LENGTH = 500;
@@ -62,16 +64,6 @@ export function validateJsonFile(file: File): void {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function parseHttpUrl(raw: string): string | null {
-  if (!raw) return null;
-  try {
-    const u = new URL(raw);
-    return u.protocol === 'http:' || u.protocol === 'https:' ? raw : null;
-  } catch {
-    return null;
-  }
-}
 
 function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(b64);

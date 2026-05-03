@@ -168,4 +168,33 @@ describe('parseCsvText — CSV parser edge cases', () => {
     const result = parseCsvText(csvWith(row));
     expect(result.valid[0].title).toBe('Title with "quotes"');
   });
+
+  it('accepts files with bare \\r line endings (Classic Mac OS style) (CR-026)', () => {
+    const text = VALID_HEADER + '\r' + ROW_SIMPLE + '\r';
+    const result = parseCsvText(text);
+    expect(result.valid).toHaveLength(1);
+    expect(result.valid[0].title).toBe('My Bookmark');
+  });
+
+  // -------------------------------------------------------------------------
+  // Round-trip: strip leading ' on import only when followed by a formula
+  // trigger char (=/+/-/@). Mirrors the export-side single-quote prefix.
+  // (M-08, conditional strip per code-reviewer gating defect 9)
+  // -------------------------------------------------------------------------
+  it.each([
+    ["'=SUM(1+1)", '=SUM(1+1)'],
+    ["'+1+1", '+1+1'],
+    ["'-cmd", '-cmd'],
+    ["'@evil", '@evil'],
+  ])('strips a leading single-quote when followed by formula trigger %s', (input, expected) => {
+    const row = `"1","${input}","https://x.com","","","","","",""`;
+    const result = parseCsvText(csvWith(row));
+    expect(result.valid[0].title).toBe(expected);
+  });
+
+  it('does NOT strip a leading apostrophe when the next character is text', () => {
+    const row = `"1","'Twas the night","https://x.com","","","","","",""`;
+    const result = parseCsvText(csvWith(row));
+    expect(result.valid[0].title).toBe("'Twas the night");
+  });
 });

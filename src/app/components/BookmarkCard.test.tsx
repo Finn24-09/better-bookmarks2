@@ -81,4 +81,65 @@ describe('BookmarkCard', () => {
       'noopener,noreferrer',
     );
   });
+
+  // ---------------------------------------------------------------------------
+  // M-04 / SEC-011 / CR-050 — defense-in-depth scheme allowlist on click
+  // ---------------------------------------------------------------------------
+  it.each([
+    ['javascript:alert(1)'],
+    ['data:text/html,<script>alert(1)</script>'],
+    ['vbscript:MsgBox("xss")'],
+    ['file:///etc/passwd'],
+    ['ftp://example.com/file'],
+    ['not a url at all'],
+  ])('Open button does NOT call window.open for unsafe URL %s', async (badUrl) => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const user = userEvent.setup();
+
+    render(<BookmarkCard title="Bad" url={badUrl} tags={[]} />);
+
+    const playButton = screen.getAllByRole('button', { name: /open bookmark/i })[0];
+    await user.click(playButton);
+
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it.each(['http://example.com/x', 'https://example.com/x', 'HTTPS://EXAMPLE.com/x'])(
+    'Open button DOES call window.open for safe URL %s',
+    async (goodUrl) => {
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      const user = userEvent.setup();
+
+      render(<BookmarkCard title="Good" url={goodUrl} tags={[]} />);
+      const playButton = screen.getAllByRole('button', { name: /open bookmark/i })[0];
+      await user.click(playButton);
+
+      expect(openSpy).toHaveBeenCalledWith(goodUrl, '_blank', 'noopener,noreferrer');
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // CR-007 — thumbnail render-side scheme allowlist (URL parse, not regex)
+  // ---------------------------------------------------------------------------
+  it.each([
+    ['javascript:alert(1)'],
+    ['data:text/html,<script>'],
+    ['file:///etc/passwd'],
+    ['not a url at all'],
+  ])('does not render an img tag for unsafe thumbnail URL %s', (badThumb) => {
+    render(<BookmarkCard title="x" url="https://example.com" tags={[]} thumbnail={badThumb} />);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('renders an img tag for a blob: thumbnail URL', () => {
+    render(
+      <BookmarkCard
+        title="x"
+        url="https://example.com"
+        tags={[]}
+        thumbnail="blob:https://example.com/abc-123"
+      />,
+    );
+    expect(screen.getByRole('img')).toBeInTheDocument();
+  });
 });

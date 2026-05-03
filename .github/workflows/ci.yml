@@ -6,15 +6,27 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel superseded runs on the same ref so a series of pushes (Dependabot
+# rebases, force-pushes during review) only spends CI minutes on the latest. (CR-042)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Default-deny GITHUB_TOKEN scope. Specific jobs that need write access can
+# elevate locally. (DET-011)
+permissions:
+  contents: read
+
 jobs:
   webapp-security-audit:
     name: Security Audit (webapp)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Pin to commit SHA — tags are mutable. (DET-011)
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - run: npm ci
       # Fail the build if any moderate-or-higher vulnerability is introduced.
@@ -26,10 +38,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: webapp-security-audit
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - run: npm ci
       - run: npm test
@@ -42,10 +54,10 @@ jobs:
       run:
         working-directory: services/email
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: services/email/package-lock.json
       - run: npm ci
@@ -59,10 +71,10 @@ jobs:
       run:
         working-directory: services/email
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: services/email/package-lock.json
       - run: npm ci
