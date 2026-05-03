@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import { Bookmark as BookmarkIcon, Upload } from "lucide-react";
 import { Header } from "./components/Header";
@@ -127,7 +127,10 @@ function AppContent() {
   // --------------------------------------------------------------------------
   // Tag name lookup (for BookmarkCard display)
   // --------------------------------------------------------------------------
-  const tagNameById = Object.fromEntries(tags.map((t) => [t.id, t.name]));
+  const tagNameById = useMemo(
+    () => Object.fromEntries(tags.map((t) => [t.id, t.name])),
+    [tags],
+  );
 
   // Open delete modal automatically when a token arrives from the email link
   useEffect(() => {

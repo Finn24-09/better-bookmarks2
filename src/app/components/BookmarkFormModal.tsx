@@ -239,10 +239,13 @@ export function BookmarkFormModal({
             </DialogClose>
           </div>
 
-          {/* Hidden file input */}
+          {/* Hidden file input — explicit raster MIMEs only. The canvas
+              re-encode pipeline strips EXIF/scripts but defense-in-depth
+              keeps SVG (and any future image MIME with a parser CVE) off
+              the input boundary entirely. (M-07 / SEC-018) */}
           <input
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg,image/webp"
             className="hidden"
             ref={fileInputRef}
             onChange={handleFileChange}

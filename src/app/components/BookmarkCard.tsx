@@ -9,6 +9,28 @@ interface BookmarkCardProps {
   onEdit?: () => void;
 }
 
+// Defense-in-depth at render/click time. Write-path validation already
+// rejects non-http(s) URLs in BookmarkFormModal and the importers, but a
+// future regression or stored data from before that validation existed
+// must not reach window.open / <img src=>. (M-04 / CR-007 / CR-050)
+function isSafeNavigationUrl(value: string): boolean {
+  try {
+    const proto = new URL(value).protocol;
+    return proto === "http:" || proto === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isSafeThumbnailUrl(value: string): boolean {
+  try {
+    const proto = new URL(value).protocol;
+    return proto === "http:" || proto === "https:" || proto === "blob:";
+  } catch {
+    return false;
+  }
+}
+
 export function BookmarkCard({ thumbnail, title, url, tags, onEdit }: BookmarkCardProps) {
   const [imgError, setImgError] = useState(false);
   useEffect(() => { setImgError(false); }, [thumbnail]);
@@ -17,7 +39,7 @@ export function BookmarkCard({ thumbnail, title, url, tags, onEdit }: BookmarkCa
     <div className="group bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden transition-all duration-300 hover:bg-white/10 hover:border-white/20 hover:scale-[1.02] hover:shadow-2xl hover:shadow-purple-500/20 flex flex-col">
       {/* Thumbnail */}
       <div className="relative aspect-video bg-linear-to-br from-purple-900/20 to-slate-900/20 overflow-hidden shrink-0">
-        {thumbnail && !imgError && /^(https?:|blob:)/i.test(thumbnail) ? (
+        {thumbnail && !imgError && isSafeThumbnailUrl(thumbnail) ? (
           <img
             src={thumbnail}
             alt={title}
@@ -69,7 +91,9 @@ export function BookmarkCard({ thumbnail, title, url, tags, onEdit }: BookmarkCa
         </button>
         <button
           aria-label="Open bookmark"
-          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+          onClick={() => {
+            if (isSafeNavigationUrl(url)) window.open(url, '_blank', 'noopener,noreferrer');
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-linear-to-br from-purple-600/30 to-purple-800/30 border border-purple-500/30 rounded-full text-xs text-white/80 hover:from-purple-600/50 hover:to-purple-800/50 hover:border-purple-500/50 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300"
         >
           <Play className="w-3.5 h-3.5 fill-current" />
