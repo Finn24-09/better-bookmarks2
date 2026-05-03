@@ -52,6 +52,12 @@ export interface ExportData {
 
 const PAGE_SIZE = 100;
 
+// Hard ceiling on pagination to defeat a runaway loop if the server (or
+// a man-in-the-middle proxy) returns the same full page indefinitely.
+// 5000-bookmark limit (matches the JSON import cap in importJson.ts) ÷
+// PAGE_SIZE = 50 pages; we round up to 100 for headroom. (CR-024)
+const MAX_PAGES = 100;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -110,12 +116,14 @@ export async function exportBookmarks(
   // --- Phase 1: Paginated bookmark fetch ---
   const allBookmarks: Bookmark[] = [];
   let offset = 0;
+  let pageCount = 0;
 
-  while (true) {
+  while (pageCount < MAX_PAGES) {
     if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
 
     const page = await getBookmarks(key, { limit: PAGE_SIZE, offset, signal });
     allBookmarks.push(...page);
+    pageCount++;
 
     emit({
       phase: 'bookmarks',
@@ -128,6 +136,10 @@ export async function exportBookmarks(
 
     if (page.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
+  }
+
+  if (pageCount >= MAX_PAGES) {
+    throw new Error(`Export exceeded the maximum of ${MAX_PAGES * PAGE_SIZE} bookmarks`);
   }
 
   // --- Phase 2: Tags ---
@@ -213,19 +225,22 @@ export async function exportBookmarks(
 // ---------------------------------------------------------------------------
 
 /** Sanitize a cell value for CSV: quote it, escape internal quotes, and
- *  prefix formula-injection characters with a tab to prevent spreadsheet execution.
- *  Note: the tab-prefix approach (OWASP-recommended) is non-standard — some versions
- *  of LibreOffice Calc and Excel still evaluate formulas after stripping leading
- *  whitespace. Risk is low here (data comes from the user's own bookmarks), but
- *  a single-quote prefix ('=formula) would be more robust if untrusted data is ever
- *  added to exports. */
+ *  prefix formula-injection characters with a literal single quote. (M-08)
+ *
+ *  Excel and LibreOffice Calc both treat a leading `'` as the "literal text"
+ *  prefix and do not evaluate the cell content. The earlier `\t` prefix was
+ *  OWASP-mentioned but documented-as-imperfect; some Calc versions strip
+ *  leading whitespace before evaluating. The csv.ts importer mirrors this:
+ *  it strips a leading `'` ONLY when the next character is a formula
+ *  trigger, so titles that legitimately begin with an apostrophe round-trip
+ *  unchanged. */
 function csvSanitize(value: string): string {
   let safe = value;
   if (
     safe.length > 0 &&
     (safe[0] === '=' || safe[0] === '+' || safe[0] === '-' || safe[0] === '@')
   ) {
-    safe = '\t' + safe;
+    safe = "'" + safe;
   }
   return '"' + safe.replace(/"/g, '""') + '"';
 }

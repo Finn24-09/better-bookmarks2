@@ -167,6 +167,16 @@ describe('exportBookmarks — pagination', () => {
 
     await expect(exportBookmarks(FAKE_KEY, DEFAULT_OPTIONS)).rejects.toThrow();
   });
+
+  it('aborts the export and throws when the page count exceeds the safety ceiling (CR-024)', async () => {
+    // Server (or our own mock) keeps returning a full page forever. Without
+    // a ceiling this would loop until the heap dies; the new MAX_PAGES guard
+    // must throw before then.
+    const fullPage = Array.from({ length: 100 }, () => makeBookmark());
+    vi.mocked(getBookmarks).mockResolvedValue(fullPage);
+
+    await expect(exportBookmarks(FAKE_KEY, DEFAULT_OPTIONS)).rejects.toThrow(/maximum/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -504,14 +514,16 @@ describe('exportToCsv', () => {
     expect(exportToCsv(data)).toContain('work|reading');
   });
 
-  it('prefixes formula-injection characters with a tab', () => {
+  it('prefixes formula-injection characters with a single quote (M-08)', () => {
     const data = makeExportData({
       totalBookmarks: 1,
       bookmarks: [
         { title: '=SUM(1+1)', url: 'https://x.com', tags: [], thumbnail: null, createdAt: '', updatedAt: '' },
       ],
     });
-    expect(exportToCsv(data)).toContain('\t=SUM(1+1)');
+    // Single-quote prefix is more robust than \t — Excel/Calc both
+    // honour ' as a literal-text marker without evaluating the cell.
+    expect(exportToCsv(data)).toContain("'=SUM(1+1)");
   });
 
   it('also prevents injection for +, -, @ prefixes', () => {
@@ -522,8 +534,21 @@ describe('exportToCsv', () => {
           { title: `${prefix}cmd`, url: 'https://x.com', tags: [], thumbnail: null, createdAt: '', updatedAt: '' },
         ],
       });
-      expect(exportToCsv(data)).toContain(`\t${prefix}cmd`);
+      expect(exportToCsv(data)).toContain(`'${prefix}cmd`);
     }
+  });
+
+  it('does NOT prefix titles that just happen to start with a literal apostrophe', () => {
+    const data = makeExportData({
+      totalBookmarks: 1,
+      bookmarks: [
+        { title: "'Twas the night", url: 'https://x.com', tags: [], thumbnail: null, createdAt: '', updatedAt: '' },
+      ],
+    });
+    // Existing apostrophes pass through unchanged; we only add a NEW '
+    // when the first char is a formula trigger.
+    expect(exportToCsv(data)).toContain("\"'Twas the night\"");
+    expect(exportToCsv(data)).not.toContain("''Twas");
   });
 
   it('includes direct URL thumbnails in the thumbnailUrl column', () => {
