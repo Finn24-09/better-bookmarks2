@@ -82,13 +82,24 @@ Open `.env` and fill in:
 
 | Group      | Variables                                                                      | Notes                                                                   |
 | ---------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| Postgres   | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`                            | Use a strong random password                                            |
-| JWT        | `PGRST_JWT_SECRET`                                                             | ≥ 32 chars; generate with `openssl rand -base64 48`                     |
-| Email role | `EMAIL_DB_PASSWORD`                                                            | Restricted DB role used only by the email service                       |
+| Postgres   | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`                            | See **Generating secrets** below — `POSTGRES_PASSWORD` must be URL-safe |
+| JWT        | `PGRST_JWT_SECRET`                                                             | ≥ 32 chars                                                              |
+| Email role | `EMAIL_DB_PASSWORD`                                                            | Restricted DB role; **must be URL-safe**                                |
 | Cookies    | `COOKIE_SECRET`                                                                | ≥ 32 chars; signs the HttpOnly reset-token cookie                       |
 | App URL    | `APP_BASE_URL`                                                                 | Public origin without trailing slash; must be `https://…` in production |
 | SMTP       | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Works with AWS SES, Mailgun, Postmark, or any SMTP relay                |
 | AWS SES    | `AWS_SES_REGION`, `AWS_SES_CONFIGURATION_SET`, `AWS_SES_FROM_ARN`              | Optional — leave blank for non-SES providers                            |
+
+#### Generating secrets
+
+`POSTGRES_PASSWORD` and `EMAIL_DB_PASSWORD` are interpolated by `docker-compose.yml` into PostgreSQL connection URIs (`postgres://user:password@host/db`). The base64 alphabet contains `/`, `+`, and `=`, which are reserved characters in URIs — a base64 password silently breaks the connection-string parser, the email service then sits with `dbHealth.ok = false` and `/health` returns 503 forever. **Use a hex-only generator for these two values:**
+
+| Variable            | URL-embedded? | Generator command         | Why                                           |
+| ------------------- | ------------- | ------------------------- | --------------------------------------------- |
+| `POSTGRES_PASSWORD` | ✅ Yes        | `openssl rand -hex 32`    | 256 bits of entropy, alphabet `[0-9a-f]` only |
+| `EMAIL_DB_PASSWORD` | ✅ Yes        | `openssl rand -hex 32`    | Same                                          |
+| `PGRST_JWT_SECRET`  | ❌ No         | `openssl rand -base64 48` | 384 bits, base64 chars are fine in env vars   |
+| `COOKIE_SECRET`     | ❌ No         | `openssl rand -base64 48` | Same                                          |
 
 **3. Start the full stack** in production mode:
 
