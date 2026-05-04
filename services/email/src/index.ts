@@ -13,9 +13,30 @@ import { resendVerificationRoute } from './routes/resendVerification.js';
 import { requestDeleteRoute } from './routes/requestDelete.js';
 import { confirmDeleteRoute } from './routes/confirmDelete.js';
 import { notifyPasswordChangeRoute } from './routes/notifyPasswordChange.js';
+import { LOG_REDACT_PATHS } from './logRedact.js';
+import { reqSerializer } from './logSerializers.js';
+
+// Re-export for backward compatibility with any external imports that
+// may have referenced this constant from `./index.js`.
+export { LOG_REDACT_PATHS } from './logRedact.js';
 
 const fastify = Fastify({
-  logger: true,
+  logger: {
+    redact: {
+      // LOG_REDACT_PATHS is `readonly` (`as const`) for safety against
+      // accidental mutation, but pino's options type expects a mutable
+      // `string[]`. Spread into a fresh array at the call site.
+      paths: [...LOG_REDACT_PATHS],
+      censor: '[redacted]',
+      remove: false,
+    },
+    // Custom `req` serializer scrubs sensitive query-string params (token,
+    // code, …) from `req.url` before pino sees it. Pino's redact only
+    // matches object property paths, not substrings inside string values,
+    // so without this the global error handler (line below) would write
+    // raw tokens from `GET /verify-email?token=…` straight to stdout.
+    serializers: { req: reqSerializer },
+  },
   // M-4: trust ONE proxy hop (the front-door Nginx). With trustProxy:true
   // (boolean), Fastify accepts any value in X-Forwarded-For, which lets a
   // remote client forge their apparent IP for both audit logs and
