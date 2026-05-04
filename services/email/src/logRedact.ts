@@ -30,4 +30,5 @@ export const LOG_REDACT_PATHS = [
   'req.body.new_password',
   'req.body.current_password',
   'req.body.token',
+  'req.body.email_token',
 ] as const;

@@ -65,6 +65,27 @@ describe('LOG_REDACT_PATHS — pino redaction integration', () => {
     expect(out).not.toContain('verify-token-xyz');
   });
 
+  it('redacts email_token in a request body', () => {
+    // Preventative: no current route accepts `email_token` in its body, but
+    // adding the explicit `req.body.email_token` path keeps the redact list
+    // consistent with its sibling `req.body.{password,new_password,
+    // current_password,token}` entries. The single-segment `*.email_token`
+    // wildcard does NOT match the two-segment `req.body.email_token` shape
+    // (pino `*` matches exactly one path segment), so without the explicit
+    // path a future route handler that accepts `email_token` in its body
+    // would silently dump it into stdout.
+    const out = captureLog((l) =>
+      l.error(
+        {
+          req: { body: { email_token: 'EMAIL-TOKEN-VALUE' } },
+        },
+        'boom',
+      ),
+    );
+    expect(out).not.toContain('EMAIL-TOKEN-VALUE');
+    expect(out).toContain('[redacted]');
+  });
+
   it('redacts new_password and current_password', () => {
     const out = captureLog((l) =>
       l.error(

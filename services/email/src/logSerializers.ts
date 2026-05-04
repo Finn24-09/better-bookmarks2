@@ -32,7 +32,7 @@ export function scrubQueryString(url: string | undefined): string | undefined {
   // literal `?` inside the query string (e.g. `foo=bar?token=X`). Treat `?`
   // as an additional pair delimiter so the smuggled token redacts rather
   // than riding through inside the previous pair's value.
-  const out: string[] = [];
+  const retained: string[] = [];
   for (const pair of rawQuery.split(/[&?]/)) {
     if (!pair) continue;
     const eq = pair.indexOf('=');
@@ -63,12 +63,12 @@ export function scrubQueryString(url: string | undefined): string | undefined {
     if ((REDACTED_QUERY_PARAMS as readonly string[]).includes(key.toLowerCase())) {
       // Emit the on-the-wire (possibly encoded) key bytes verbatim so an
       // operator can still see the request shape — only the value is masked.
-      out.push(`${rawKey}=[redacted]`);
+      retained.push(`${rawKey}=[redacted]`);
     } else {
-      out.push(pair);
+      retained.push(pair);
     }
   }
-  return out.length ? `${path}?${out.join('&')}` : path;
+  return retained.length ? `${path}?${retained.join('&')}` : path;
 }
 
 interface RawRequestLike {
@@ -85,6 +85,14 @@ export function reqSerializer(req: {
   ip?: string;
   hostname?: string;
 }) {
+  // SEC: this serializer deliberately passes `raw.headers` through verbatim
+  // — including `authorization` and `cookie`. The masking of those header
+  // values is performed by pino's `redact` config (see `LOG_REDACT_PATHS`
+  // in `logRedact.ts`, wired up at the `serializers: { req: reqSerializer }`
+  // call site in `index.ts`). If `redact` is ever removed or its
+  // `req.headers.authorization` / `req.headers.cookie` paths are dropped,
+  // this serializer will silently start dumping the bearer JWT and signed
+  // session cookie into stdout. Keep the two sides in sync.
   // fastify wraps the raw node request; check both shapes for safety.
   const raw = req.raw ?? req;
   return {

@@ -35,6 +35,12 @@ const fastify = Fastify({
     // matches object property paths, not substrings inside string values,
     // so without this the global error handler (line below) would write
     // raw tokens from `GET /verify-email?token=…` straight to stdout.
+    //
+    // SEC: `reqSerializer` (see `logSerializers.ts`) intentionally does NOT
+    // scrub headers — it passes `raw.headers` through verbatim and relies on
+    // the `redact` block above to mask `authorization` / `cookie`. Removing
+    // or weakening `redact` here will silently reintroduce a bearer-JWT and
+    // session-cookie leak into stdout. Keep the two sides in sync.
     serializers: { req: reqSerializer },
   },
   // M-4: trust ONE proxy hop (the front-door Nginx). With trustProxy:true
