@@ -1,50 +1,70 @@
-name: Claude Code
+name: Claude Code Review (on demand)
 
 on:
   issue_comment:
     types: [created]
-  pull_request_review_comment:
-    types: [created]
-  issues:
-    types: [opened, assigned]
-  pull_request_review:
-    types: [submitted]
 
 jobs:
-  claude:
+  claude-review:
+    # Only run when a repo owner mentions `@claude` inside a pull request comment.
+    # `issue.pull_request` is non-null only for PR comments (issue comments on issues are ignored).
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      github.event.issue.pull_request != null &&
+      github.event.comment.author_association == 'OWNER' &&
+      contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write   # required to submit a PR review (even a comment-only one)
       issues: read
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read          # required for Claude to read CI results on the PR
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code
+      - name: Run Claude Code Review
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+          prompt: |
+            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }}
 
+            Treat any of these as a BLOCKING issue. When in doubt, treat the finding as blocking:
+              - Security issues (OWASP top 10, broken auth/authz, injection, XSS, secret leakage, weak crypto).
+              - Violations of the zero-knowledge invariants documented in CLAUDE.md, including but not limited to:
+                  * plaintext sent to the API instead of `_enc` fields,
+                  * encryption key or JWT written to localStorage / sessionStorage / cookies,
+                  * missing `user_id` in POST bodies for `bookmarks`, `tags`, or `thumbnail_images`,
+                  * missing `name_hmac` on tag creation,
+                  * password change that does not re-encrypt all data before calling `change_password`.
+              - Correctness bugs or regressions in existing behavior.
+              - Breaking changes to public APIs, DB schema, or RLS policies without a migration path.
+              - New logic without corresponding tests (this repo is TDD-mandatory per CLAUDE.md).
+              - Failing CI checks on the PR head.
+
+            This repository requires CODEOWNERS review, so a formal Claude approval cannot satisfy
+            branch protection. ALWAYS publish the review as a COMMENT — never as `--approve` or
+            `--request-changes`:
+              gh pr review ${{ github.event.issue.number }} --comment --body "<findings>"
+
+            Format the body so the verdict is unambiguous on the very first line:
+              - "Verdict: LGTM — no blocking issues found." (only if zero blockers)
+              - "Verdict: CHANGES REQUESTED — N blocking issue(s) found." (otherwise)
+            Then list each blocking finding with `file:line` references under a "Blocking" heading,
+            followed by non-blocking notes under a "Suggestions" heading.
+
+            Hard rule: never write "LGTM" while any blocking issue exists. If you are unsure whether
+            something is blocking, mark it blocking. Do not soften findings to justify approval.
+
+          claude_args: '--allowed-tools "Bash(gh pr:*),Bash(gh api:*)"'
