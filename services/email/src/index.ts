@@ -69,7 +69,11 @@ fastify.get(
 );
 
 // Start the background DB ping. unref'd so it never holds the process open.
-startDbHealthLoop();
+// Pass the fastify logger so connectivity failures (auth errors, malformed
+// connection URI, network unreachable) surface in container logs instead of
+// being silently swallowed — without this, operators only see "/health → 503"
+// with no indication of the actual cause.
+startDbHealthLoop(fastify.log);
 
 await fastify.register(requestResetRoute);
 await fastify.register(resetPasswordRoute);
