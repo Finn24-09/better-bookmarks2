@@ -211,7 +211,7 @@ export function ManageTagsModal({
               <p className="text-white/40 text-sm">No tags yet.</p>
             </div>
           ) : (
-            <ul className="max-h-[60vh] overflow-y-auto overscroll-contain divide-y divide-white/5">
+            <ul className="max-h-[60vh] overflow-y-auto overflow-x-hidden overscroll-contain divide-y divide-white/5 pr-1.5">
               {filteredTags.map((tag) => (
                 <TagRow
                   key={tag.id}
