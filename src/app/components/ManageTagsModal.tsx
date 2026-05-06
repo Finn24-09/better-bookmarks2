@@ -337,6 +337,8 @@ function TagRow({
           value={rowState.value}
           onChange={(e) => setRowState({ ...rowState, value: e.target.value })}
           aria-label={`New name for ${tag.name}`}
+          // +1 lets the user type one char past the cap so Save visibly disables,
+          // instead of the input silently swallowing keystrokes at the boundary.
           maxLength={MAX_TAG_LENGTH + 1}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -443,6 +445,12 @@ function ConfirmDeleteRow({
   onConfirm,
   onCancel,
 }: ConfirmDeleteRowProps) {
+  // Latest-callback ref so the listener registers once and always reads the
+  // current onCancel. Without this, the parent passes a fresh arrow each
+  // render; the effect would tear down and re-add the listener every time,
+  // leaving a swap-gap where an Escape keystroke could slip past.
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
   useEffect(() => {
     // Window capture phase fires before document capture, so this intercepts
     // the keystroke before Radix Dialog's internal handler runs. Use
@@ -453,12 +461,12 @@ function ConfirmDeleteRow({
         e.stopImmediatePropagation();
         e.stopPropagation();
         e.preventDefault();
-        onCancel();
+        onCancelRef.current();
       }
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [onCancel]);
+  }, []);
 
   return (
     <li role="alert" className="py-3">
