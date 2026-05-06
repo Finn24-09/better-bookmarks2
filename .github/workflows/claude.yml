@@ -27,7 +27,12 @@ jobs:
 
       - name: Run Claude Code Review
         id: claude
-        uses: anthropics/claude-code-action@v1
+        # Pinned to v1.0.112 — v1.0.113 ships Claude Code 2.1.129, whose installer
+        # reports success but does not place the binary at ~/.local/bin/claude,
+        # causing the plugin marketplace add step to fail with ENOENT.
+        # See https://github.com/anthropics/claude-code-action/issues/1290.
+        # Revisit once upstream ships a fix and bump back to @v1.
+        uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2 # v1.0.112
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
