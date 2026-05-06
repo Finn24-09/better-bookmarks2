@@ -161,6 +161,32 @@ describe('ManageTagsModal', () => {
     expect(input.value).toBe('Personal');
   });
 
+  it('pre-fills the edit input with the trimmed name so legacy whitespace can be fixed', async () => {
+    const user = userEvent.setup();
+    // Legacy record whose decrypted name has surrounding whitespace, e.g.
+    // a tag created before the createTag trim fix landed.
+    renderModal({ tags: [makeTag({ id: 'tag-x', name: ' Personal ' })] });
+    // jsdom collapses repeated whitespace inside aria-label lookups, so
+    // match the trimmed substring rather than the raw template.
+    await user.click(screen.getByLabelText(/^Rename .*Personal/i));
+    const input = screen.getByLabelText(/^New name for .*Personal/i) as HTMLInputElement;
+    expect(input.value).toBe('Personal');
+    // The user wants to commit the trimmed value as-is — Save must be enabled
+    // because the seeded value differs from the legacy raw original.
+    const saveBtn = screen.getByLabelText('Save rename');
+    expect(saveBtn).not.toBeDisabled();
+    await user.click(saveBtn);
+    await waitFor(() => {
+      expect(updateTag).toHaveBeenCalledWith(
+        'tag-x',
+        'Personal',
+        'user-uuid-123',
+        mockCryptoKey,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+  });
+
   it('Save is disabled when the trimmed value equals the current name (no-op)', async () => {
     const user = userEvent.setup();
     renderModal({ tags: [makeTag({ name: 'Personal' })] });

@@ -100,7 +100,11 @@ export function ManageTagsModal({
   }, [tags, bookmarks]);
 
   const enterEdit = (tag: Tag) => {
-    setRowState({ kind: 'edit', tagId: tag.id, value: tag.name, saving: false });
+    // Seed with the trimmed name so a legacy record whose decrypted name has
+    // surrounding whitespace (created before the createTag trim fix) is
+    // editable: without this, trim-only "fixes" would equal the trimmed
+    // original and Save would stay silently disabled.
+    setRowState({ kind: 'edit', tagId: tag.id, value: tag.name.trim(), saving: false });
   };
 
   const enterConfirm = (tag: Tag) => {
@@ -122,11 +126,13 @@ export function ManageTagsModal({
     if (!cryptoKey || !userId) return;
 
     const trimmed = rowState.value.trim();
-    const trimmedOriginal = tag.name.trim();
+    // Compare against the raw stored name (not its trim) so a legacy record
+    // with surrounding whitespace can be normalised to the trimmed form by
+    // committing without further edits.
     if (
       trimmed.length === 0 ||
       trimmed.length > MAX_TAG_LENGTH ||
-      trimmed === trimmedOriginal
+      trimmed === tag.name
     ) {
       return;
     }
@@ -314,12 +320,14 @@ function TagRow({
 
   if (isEditing && rowState.kind === 'edit') {
     const trimmed = rowState.value.trim();
-    const trimmedOriginal = tag.name.trim();
+    // Compare against the raw stored name (mirrors handleSaveRename) so a
+    // legacy whitespace tag can be saved as its trimmed form with no further
+    // edits. A clean tag still gets Save correctly disabled on no-op.
     const saveDisabled =
       rowState.saving ||
       trimmed.length === 0 ||
       trimmed.length > MAX_TAG_LENGTH ||
-      trimmed === trimmedOriginal;
+      trimmed === tag.name;
 
     return (
       <li className="flex items-center gap-2 py-2">
