@@ -103,10 +103,7 @@ export function TagMultiSelect({
               onValueChange={setSearch}
               className="text-white/90 placeholder:text-white/40 text-sm"
             />
-            <CommandList
-              className="max-h-50 overflow-y-auto overscroll-contain touch-pan-y p-1"
-              onWheel={(e) => { e.currentTarget.scrollTop += e.deltaY; }}
-            >
+            <CommandList className="max-h-50 overflow-y-auto overscroll-contain touch-pan-y p-1">
               {filtered.length === 0 && !showCreate && (
                 <CommandEmpty className="py-6 text-center text-sm text-white/40">
                   No tags found.
