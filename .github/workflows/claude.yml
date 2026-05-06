@@ -1,50 +1,105 @@
 name: Claude Code
 
+# Two owner-only commands, both via issue/PR comments:
+#   - "@claude review" on an open pull request -> Claude reviews the PR
+#   - "@claude pr"     on an open issue        -> Claude opens a PR from the
+#                                                 issue's linked development
+#                                                 branch
+#
+# author_association == 'OWNER' restricts both commands to the repository
+# owner; comments from collaborators, members, or strangers cannot trigger
+# Claude.
+
 on:
   issue_comment:
     types: [created]
-  pull_request_review_comment:
-    types: [created]
-  issues:
-    types: [opened, assigned]
-  pull_request_review:
-    types: [submitted]
 
 jobs:
-  claude:
+  pr-review:
+    name: Review pull request on @claude review
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      github.event.issue.pull_request != null &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.author_association == 'OWNER' &&
+      contains(github.event.comment.body, '@claude review')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code
+      - name: Run Claude code review
         id: claude
-        uses: anthropics/claude-code-action@v1
+        # Pinned to v1.0.112 -- v1.0.113 ships Claude Code 2.1.129, whose installer
+        # reports success but does not place the binary at ~/.local/bin/claude,
+        # causing the plugin marketplace add step to fail with ENOENT.
+        # See https://github.com/anthropics/claude-code-action/issues/1290.
+        # Revisit once upstream ships a fix and bump back to @v1.
+        uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2 # v1.0.112
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
-          # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
+          prompt: |
+            Review pull request #${{ github.event.issue.number }} in
+            ${{ github.repository }}. Focus on correctness, security,
+            maintainability, and test coverage. Use inline review comments
+            where they add value and finish with an overall summary comment
+            on the PR. Do not approve or merge the pull request.
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+  issue-to-pr:
+    name: Open PR from issue on @claude pr
+    if: |
+      github.event.issue.pull_request == null &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.author_association == 'OWNER' &&
+      contains(github.event.comment.body, '@claude pr')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+      - name: Run Claude open-PR-from-issue
+        id: claude
+        # Pinned to v1.0.112 -- see comment on pr-review job above.
+        uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2 # v1.0.112
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Repository:     ${{ github.repository }}
+            Issue:          #${{ github.event.issue.number }}
+            Default branch: ${{ github.event.repository.default_branch }}
 
+            The repository owner commented `@claude pr` on the issue above.
+            Open a pull request from the development branch tied to that
+            issue. Steps:
+
+            1. Run `gh issue develop --list ${{ github.event.issue.number }}`
+               to find the development branch linked to this issue.
+            2. If no branch is linked, comment on the issue explaining that
+               no development branch is tied to it and stop. Do not create a
+               branch yourself.
+            3. If the linked branch has no commits ahead of
+               ${{ github.event.repository.default_branch }}, comment on the
+               issue explaining that and stop.
+            4. Otherwise create a pull request from the linked branch into
+               ${{ github.event.repository.default_branch }} with
+               `gh pr create`. Use the issue title as the PR title; in the
+               body, summarise the issue briefly and include the line
+               "Closes #${{ github.event.issue.number }}" so the issue auto-
+               closes on merge.
+            5. Reply to the issue with the URL of the new PR.
