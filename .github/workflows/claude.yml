@@ -96,10 +96,25 @@ jobs:
             3. If the linked branch has no commits ahead of
                ${{ github.event.repository.default_branch }}, comment on the
                issue explaining that and stop.
-            4. Otherwise create a pull request from the linked branch into
-               ${{ github.event.repository.default_branch }} with
-               `gh pr create`. Use the issue title as the PR title; in the
-               body, summarise the issue briefly and include the line
-               "Closes #${{ github.event.issue.number }}" so the issue auto-
-               closes on merge.
-            5. Reply to the issue with the URL of the new PR.
+            4. Read the issue body and inspect the diff between the linked
+               branch and ${{ github.event.repository.default_branch }}
+               (e.g. `gh issue view ${{ github.event.issue.number }}`,
+               `git diff origin/${{ github.event.repository.default_branch }}...origin/<branch>`).
+               The pull request description must be grounded in BOTH
+               sources -- never invent changes that are not in the diff,
+               and never drop context that is in the issue.
+            5. Create the pull request with `gh pr create` from the linked
+               branch into ${{ github.event.repository.default_branch }}:
+                 - Title: the issue title.
+                 - Body: a comprehensive description that
+                     (a) restates the problem or goal from the issue,
+                     (b) summarises what actually changed (group by area
+                         when the diff spans many files, name the key
+                         functions or modules touched), and
+                     (c) flags anything reviewers should look closely at
+                         (security-sensitive code, breaking behaviour,
+                         known follow-ups, test coverage gaps).
+                   End the body with
+                   "Closes #${{ github.event.issue.number }}" so the issue
+                   auto-closes on merge.
+            6. Reply to the issue with the URL of the new PR.
