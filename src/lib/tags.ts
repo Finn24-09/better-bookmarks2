@@ -2,6 +2,17 @@ import { apiFetch } from './api';
 import { encrypt, decrypt, computeHmac } from './crypto';
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum allowed length (in characters) for a tag name.
+ * Shared with `importJson.ts` so import and rename agree on the same ceiling;
+ * a single source of truth keeps validation messages consistent across UIs.
+ */
+export const MAX_TAG_LENGTH = 100;
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -45,9 +56,13 @@ export async function getTags(
 // ---------------------------------------------------------------------------
 
 export async function createTag(name: string, userId: string, key: CryptoKey): Promise<Tag> {
+  // Trim before encrypt + HMAC: the unique constraint is keyed on name_hmac,
+  // so " Personal " and "Personal" must collide — otherwise users can store
+  // visually-identical duplicates that bypass dedup.
+  const trimmed = name.trim();
   const [name_enc, name_hmac] = await Promise.all([
-    encrypt(key, name),
-    computeHmac(userId, name),
+    encrypt(key, trimmed),
+    computeHmac(userId, trimmed),
   ]);
 
   const rows = await apiFetch<TagRow[]>('/tags', {
@@ -56,7 +71,37 @@ export async function createTag(name: string, userId: string, key: CryptoKey): P
     body: JSON.stringify({ user_id: userId, name_enc, name_hmac }),
   });
 
-  return { id: rows[0].id, name, keyVersion: rows[0].key_version ?? 1 };
+  return { id: rows[0].id, name: trimmed, keyVersion: rows[0].key_version ?? 1 };
+}
+
+// ---------------------------------------------------------------------------
+// Update (rename)
+// ---------------------------------------------------------------------------
+
+/**
+ * Rename a tag. Re-encrypts `name_enc` with the existing key and recomputes
+ * `name_hmac` against `userId`, which preserves the `UNIQUE(user_id, name_hmac)`
+ * dedup invariant. The encryption key is unchanged, so `key_version` is NOT
+ * sent in the body — including it would cross-contaminate the rotation tracker.
+ * `user_id` is also omitted: RLS enforces ownership and the column is immutable.
+ */
+export async function updateTag(
+  id: string,
+  newName: string,
+  userId: string,
+  key: CryptoKey,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  const trimmed = newName.trim();
+  const [name_enc, name_hmac] = await Promise.all([
+    encrypt(key, trimmed),
+    computeHmac(userId, trimmed),
+  ]);
+  await apiFetch(`/tags?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name_enc, name_hmac }),
+    signal: options?.signal,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -90,8 +135,11 @@ export async function getTagRows(): Promise<TagRow[]> {
 // Delete
 // ---------------------------------------------------------------------------
 
-export async function deleteTag(id: string): Promise<void> {
-  await apiFetch(`/tags?id=eq.${id}`, { method: 'DELETE' });
+export async function deleteTag(
+  id: string,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  await apiFetch(`/tags?id=eq.${id}`, { method: 'DELETE', signal: options?.signal });
 }
 
 // ---------------------------------------------------------------------------

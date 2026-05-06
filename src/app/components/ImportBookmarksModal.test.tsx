@@ -17,6 +17,9 @@ vi.mock('../../lib/tags', () => ({
   getTags: vi.fn(),
   createTag: vi.fn(),
   setBookmarkTags: vi.fn(),
+  // MAX_TAG_LENGTH is re-exported from tags.ts and consumed by importJson.ts;
+  // factory mocks must include it or import-time evaluation breaks parsing.
+  MAX_TAG_LENGTH: 100,
 }));
 
 vi.mock('../../lib/bookmarks', () => ({
