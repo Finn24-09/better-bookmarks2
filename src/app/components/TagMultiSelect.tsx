@@ -58,7 +58,7 @@ export function TagMultiSelect({
 
   return (
     <div className="w-full space-y-2">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={setOpen} modal>
         <PopoverTrigger asChild>
           <button
             type="button"
@@ -103,10 +103,7 @@ export function TagMultiSelect({
               onValueChange={setSearch}
               className="text-white/90 placeholder:text-white/40 text-sm"
             />
-            <CommandList
-              className="max-h-50 overflow-y-auto overscroll-contain touch-pan-y p-1"
-              onWheel={(e) => { e.currentTarget.scrollTop += e.deltaY; }}
-            >
+            <CommandList className="max-h-50 overflow-y-auto overscroll-contain touch-pan-y p-1">
               {filtered.length === 0 && !showCreate && (
                 <CommandEmpty className="py-6 text-center text-sm text-white/40">
                   No tags found.
