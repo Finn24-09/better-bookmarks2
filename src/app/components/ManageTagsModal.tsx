@@ -85,6 +85,20 @@ export function ManageTagsModal({
     return tags.filter((t) => t.name.toLowerCase().includes(q));
   }, [tags, search, showSearch]);
 
+  // Tag-id -> bookmark-count, computed once per bookmarks/tags change so each
+  // row reads its count in O(1) instead of scanning bookmarks per render.
+  const usageByTagId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const tag of tags) map.set(tag.id, 0);
+    for (const bm of bookmarks) {
+      for (const id of bm.tagIds) {
+        const prev = map.get(id);
+        if (prev !== undefined) map.set(id, prev + 1);
+      }
+    }
+    return map;
+  }, [tags, bookmarks]);
+
   const enterEdit = (tag: Tag) => {
     setRowState({ kind: 'edit', tagId: tag.id, value: tag.name, saving: false });
   };
@@ -216,7 +230,7 @@ export function ManageTagsModal({
                 <TagRow
                   key={tag.id}
                   tag={tag}
-                  bookmarks={bookmarks}
+                  usageCount={usageByTagId.get(tag.id) ?? 0}
                   rowState={rowState}
                   setRowState={setRowState}
                   onEnterEdit={() => enterEdit(tag)}
@@ -258,7 +272,7 @@ export function ManageTagsModal({
 
 interface TagRowProps {
   tag: Tag;
-  bookmarks: Bookmark[];
+  usageCount: number;
   rowState: RowState;
   setRowState: (s: RowState) => void;
   onEnterEdit: () => void;
@@ -272,7 +286,7 @@ interface TagRowProps {
 
 function TagRow({
   tag,
-  bookmarks,
+  usageCount,
   rowState,
   setRowState,
   onEnterEdit,
@@ -352,13 +366,11 @@ function TagRow({
   }
 
   if (isConfirming && rowState.kind === 'confirm') {
-    // Local UX hint, NOT a security gate. The confirm runs regardless of count;
-    // the value can be stale if the parent has not re-fetched bookmarks.
-    const count = bookmarks.filter((b) => b.tagIds.includes(tag.id)).length;
+    // Local UX hint, NOT a security gate. The confirm runs regardless of count.
     return (
       <ConfirmDeleteRow
         tagName={tag.name}
-        count={count}
+        count={usageCount}
         deleting={rowState.deleting}
         onConfirm={onConfirmDelete}
         onCancel={onCancelConfirm}
@@ -371,6 +383,12 @@ function TagRow({
     <li className="flex items-center gap-2 py-2">
       <span className="flex-1 min-w-0 text-sm text-white/90 truncate" title={tag.name}>
         {tag.name}
+      </span>
+      <span
+        aria-label={`Used in ${usageCount} bookmark${usageCount === 1 ? '' : 's'}`}
+        className="bg-white/5 border border-white/10 rounded-full px-2 py-0.5 text-xs text-white/50 flex-shrink-0"
+      >
+        {usageCount}
       </span>
       <button
         type="button"
