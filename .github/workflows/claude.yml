@@ -9,6 +9,15 @@ name: Claude Code
 # author_association == 'OWNER' restricts both commands to the repository
 # owner; comments from collaborators, members, or strangers cannot trigger
 # Claude.
+#
+# Both jobs run the action in agent mode (we provide a prompt:). Agent mode
+# does not auto-allow shell tools and does not post a tracking comment, so
+# each job must:
+#   1. Add an "eyes" reaction on the trigger comment as immediate ack.
+#   2. Pass --allowedTools in claude_args so Claude can run gh/git.
+#   3. Cap runtime via timeout-minutes and --max-turns to prevent runaway
+#      cost when the agent thrashes against permission denials or other
+#      unexpected failures.
 
 on:
   issue_comment:
@@ -23,6 +32,7 @@ jobs:
       github.event.comment.author_association == 'OWNER' &&
       contains(github.event.comment.body, '@claude review')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
@@ -30,6 +40,16 @@ jobs:
       id-token: write
       actions: read
     steps:
+      - name: React to trigger comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          gh api -X POST \
+            "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content=eyes >/dev/null
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -47,12 +67,19 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
+          claude_args: |
+            --max-turns 30
+            --allowedTools "Read,Glob,Grep,LS,Bash(gh:*),Bash(git:*)"
           prompt: |
-            Review pull request #${{ github.event.issue.number }} in
-            ${{ github.repository }}. Focus on correctness, security,
-            maintainability, and test coverage. Use inline review comments
-            where they add value and finish with an overall summary comment
-            on the PR. Do not approve or merge the pull request.
+            Review pull request #${{ github.event.issue.number }} in ${{ github.repository }}.
+            Focus on correctness, security, maintainability, and test coverage.
+
+            Use `gh pr view ${{ github.event.issue.number }}` and
+            `gh pr diff ${{ github.event.issue.number }}` to read the PR.
+            Post inline review comments via `gh api` where they add value, then
+            finish with one overall summary comment on the PR via
+            `gh pr comment ${{ github.event.issue.number }} --body "..."`.
+            Do not approve or merge the PR.
 
   issue-to-pr:
     name: Open PR from issue on @claude pr
@@ -62,12 +89,23 @@ jobs:
       github.event.comment.author_association == 'OWNER' &&
       contains(github.event.comment.body, '@claude pr')
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     permissions:
       contents: read
       pull-requests: write
       issues: write
       id-token: write
     steps:
+      - name: React to trigger comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          gh api -X POST \
+            "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content=eyes >/dev/null
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -79,42 +117,35 @@ jobs:
         uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2 # v1.0.112
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --max-turns 25
+            --allowedTools "Read,Glob,Grep,LS,Bash(gh:*),Bash(git:*)"
           prompt: |
-            Repository:     ${{ github.repository }}
-            Issue:          #${{ github.event.issue.number }}
-            Default branch: ${{ github.event.repository.default_branch }}
+            Repo:   ${{ github.repository }}
+            Issue:  #${{ github.event.issue.number }}
+            Base:   ${{ github.event.repository.default_branch }}
 
-            The repository owner commented `@claude pr` on the issue above.
-            Open a pull request from the development branch tied to that
-            issue. Steps:
+            Open a PR from the development branch linked to issue
+            #${{ github.event.issue.number }} into ${{ github.event.repository.default_branch }}.
 
-            1. Run `gh issue develop --list ${{ github.event.issue.number }}`
-               to find the development branch linked to this issue.
-            2. If no branch is linked, comment on the issue explaining that
-               no development branch is tied to it and stop. Do not create a
-               branch yourself.
-            3. If the linked branch has no commits ahead of
-               ${{ github.event.repository.default_branch }}, comment on the
-               issue explaining that and stop.
-            4. Read the issue body and inspect the diff between the linked
-               branch and ${{ github.event.repository.default_branch }}
-               (e.g. `gh issue view ${{ github.event.issue.number }}`,
-               `git diff origin/${{ github.event.repository.default_branch }}...origin/<branch>`).
-               The pull request description must be grounded in BOTH
-               sources -- never invent changes that are not in the diff,
-               and never drop context that is in the issue.
-            5. Create the pull request with `gh pr create` from the linked
-               branch into ${{ github.event.repository.default_branch }}:
-                 - Title: the issue title.
-                 - Body: a comprehensive description that
-                     (a) restates the problem or goal from the issue,
-                     (b) summarises what actually changed (group by area
-                         when the diff spans many files, name the key
-                         functions or modules touched), and
-                     (c) flags anything reviewers should look closely at
-                         (security-sensitive code, breaking behaviour,
-                         known follow-ups, test coverage gaps).
-                   End the body with
-                   "Closes #${{ github.event.issue.number }}" so the issue
-                   auto-closes on merge.
-            6. Reply to the issue with the URL of the new PR.
+            1. `gh issue develop --list ${{ github.event.issue.number }}` -> find the linked branch <BRANCH>.
+               - No branch linked: `gh issue comment ${{ github.event.issue.number }} --body "No development branch is linked to this issue."` and stop.
+               - Branch has 0 commits ahead of ${{ github.event.repository.default_branch }}
+                 (`git rev-list --count origin/${{ github.event.repository.default_branch }}..origin/<BRANCH>`):
+                 `gh issue comment ${{ github.event.issue.number }} --body "Branch <BRANCH> has no commits ahead of ${{ github.event.repository.default_branch }}."` and stop.
+
+            2. Read the issue and the diff:
+                 `gh issue view ${{ github.event.issue.number }}`
+                 `git diff origin/${{ github.event.repository.default_branch }}...origin/<BRANCH>`
+
+            3. `gh pr create --base ${{ github.event.repository.default_branch }} --head <BRANCH> --title "<issue title>" --body "<BODY>"`.
+               <BODY> must:
+                 (a) restate the problem/goal from the issue;
+                 (b) summarise what actually changed in the diff -- group by area for
+                     large diffs, name key files/functions; never invent changes not
+                     present in the diff;
+                 (c) flag anything reviewers should look at closely (security-sensitive
+                     code, breaking behaviour, test coverage gaps);
+                 (d) end with "Closes #${{ github.event.issue.number }}".
+
+            4. `gh issue comment ${{ github.event.issue.number }} --body "Opened <PR_URL>"`.
