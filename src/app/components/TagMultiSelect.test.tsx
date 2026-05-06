@@ -4,6 +4,17 @@ import userEvent from '@testing-library/user-event';
 import { TagMultiSelect } from './TagMultiSelect';
 import type { Tag } from '../../lib/tags';
 
+// Spy on the local Popover wrapper so we can assert that TagMultiSelect
+// opts into modal mode. modal={true} is what makes Radix wrap the popover
+// content in react-remove-scroll, which is what unblocks touch scrolling
+// inside the dropdown when this component is nested in a Dialog.
+vi.mock('./ui/popover', async () => {
+  const actual = await vi.importActual<typeof import('./ui/popover')>('./ui/popover');
+  return { ...actual, Popover: vi.fn(actual.Popover) };
+});
+
+import { Popover } from './ui/popover';
+
 function makeTags(names: string[]): Tag[] {
   return names.map((name, i) => ({ id: `tag-${i + 1}`, name }));
 }
@@ -11,6 +22,19 @@ function makeTags(names: string[]): Tag[] {
 describe('TagMultiSelect', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('opens the Popover in modal mode so touch scrolling inside the dropdown is not blocked when nested in a Dialog', () => {
+    render(
+      <TagMultiSelect
+        available={makeTags(['React', 'TypeScript'])}
+        selected={[]}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(vi.mocked(Popover)).toHaveBeenCalled();
+    const props = vi.mocked(Popover).mock.calls[0][0];
+    expect(props.modal).toBe(true);
   });
 
   it('shows "Select tags…" placeholder when nothing is selected', () => {

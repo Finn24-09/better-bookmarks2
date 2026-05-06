@@ -58,7 +58,7 @@ export function TagMultiSelect({
 
   return (
     <div className="w-full space-y-2">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={setOpen} modal>
         <PopoverTrigger asChild>
           <button
             type="button"
