@@ -13,9 +13,8 @@ name: Claude Code
 # Both jobs run the action in agent mode (we provide a prompt:). Agent mode
 # does not auto-allow shell tools and does not post a tracking comment, so
 # each job must:
-#   1. Add an "eyes" reaction on the trigger comment as immediate ack.
-#   2. Pass --allowedTools in claude_args so Claude can run gh/git.
-#   3. Cap runtime via timeout-minutes and --max-turns to prevent runaway
+#   1. Pass --allowedTools in claude_args so Claude can run gh/git.
+#   2. Cap runtime via timeout-minutes and --max-turns to prevent runaway
 #      cost when the agent thrashes against permission denials or other
 #      unexpected failures.
 
@@ -40,16 +39,6 @@ jobs:
       id-token: write
       actions: read
     steps:
-      - name: React to trigger comment
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          COMMENT_ID: ${{ github.event.comment.id }}
-        run: |
-          gh api -X POST \
-            "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
-            -f content=eyes >/dev/null
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -76,9 +65,14 @@ jobs:
 
             Use `gh pr view ${{ github.event.issue.number }}` and
             `gh pr diff ${{ github.event.issue.number }}` to read the PR.
-            Post inline review comments via `gh api` where they add value, then
-            finish with one overall summary comment on the PR via
-            `gh pr comment ${{ github.event.issue.number }} --body "..."`.
+
+            Post exactly one summary comment on the PR via
+            `gh pr comment ${{ github.event.issue.number }} --body "<MARKDOWN>"`.
+            That single comment is the entire review output.
+
+            Do NOT post inline review comments (no `gh api .../pulls/.../reviews`,
+            no `gh pr review`); fold any per-file or per-line observations into
+            the summary instead, citing file paths and line numbers in prose.
             Do not approve or merge the PR.
 
   issue-to-pr:
@@ -134,11 +128,14 @@ jobs:
                  (`git rev-list --count origin/${{ github.event.repository.default_branch }}..origin/<BRANCH>`):
                  `gh issue comment ${{ github.event.issue.number }} --body "Branch <BRANCH> has no commits ahead of ${{ github.event.repository.default_branch }}."` and stop.
 
-            2. Read the issue and the diff:
-                 `gh issue view ${{ github.event.issue.number }}`
+            2. Read the issue (title, body, labels) and the diff:
+                 `gh issue view ${{ github.event.issue.number }} --json title,body,labels`
                  `git diff origin/${{ github.event.repository.default_branch }}...origin/<BRANCH>`
 
-            3. `gh pr create --base ${{ github.event.repository.default_branch }} --head <BRANCH> --title "<issue title>" --body "<BODY>"`.
+            3. Create the PR, copying every label from the issue onto the new PR
+               (one --label flag per label name; omit --label entirely if the
+               issue has no labels):
+                 `gh pr create --base ${{ github.event.repository.default_branch }} --head <BRANCH> --title "<issue title>" --label "<L1>" --label "<L2>" --body "<BODY>"`
                <BODY> must:
                  (a) restate the problem/goal from the issue;
                  (b) summarise what actually changed in the diff -- group by area for
@@ -148,4 +145,7 @@ jobs:
                      code, breaking behaviour, test coverage gaps);
                  (d) end with "Closes #${{ github.event.issue.number }}".
 
-            4. `gh issue comment ${{ github.event.issue.number }} --body "Opened <PR_URL>"`.
+            Do NOT post any confirmation comment on the issue after the PR is
+            opened. With "Closes #${{ github.event.issue.number }}" in the body,
+            GitHub auto-records the PR in the issue's timeline -- an extra
+            "Opened <URL>" comment is just noise.
