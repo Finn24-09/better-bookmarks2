@@ -1,33 +1,43 @@
-name: Claude Code Review (on demand)
+name: Claude Code
+
+# Two owner-only commands, both via issue/PR comments:
+#   - "@claude review" on an open pull request -> Claude reviews the PR
+#   - "@claude pr"     on an open issue        -> Claude opens a PR from the
+#                                                 issue's linked development
+#                                                 branch
+#
+# author_association == 'OWNER' restricts both commands to the repository
+# owner; comments from collaborators, members, or strangers cannot trigger
+# Claude.
 
 on:
   issue_comment:
     types: [created]
 
 jobs:
-  claude-review:
-    # Only run when a repo owner mentions `@claude` inside a pull request comment.
-    # `issue.pull_request` is non-null only for PR comments (issue comments on issues are ignored).
+  pr-review:
+    name: Review pull request on @claude review
     if: |
       github.event.issue.pull_request != null &&
+      github.event.issue.state == 'open' &&
       github.event.comment.author_association == 'OWNER' &&
-      contains(github.event.comment.body, '@claude')
+      contains(github.event.comment.body, '@claude review')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write   # required to submit a PR review (even a comment-only one)
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
-      actions: read          # required for Claude to read CI results on the PR
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code Review
+      - name: Run Claude code review
         id: claude
-        # Pinned to v1.0.112 — v1.0.113 ships Claude Code 2.1.129, whose installer
+        # Pinned to v1.0.112 -- v1.0.113 ships Claude Code 2.1.129, whose installer
         # reports success but does not place the binary at ~/.local/bin/claude,
         # causing the plugin marketplace add step to fail with ENOENT.
         # See https://github.com/anthropics/claude-code-action/issues/1290.
@@ -35,41 +45,76 @@ jobs:
         uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2 # v1.0.112
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
           additional_permissions: |
             actions: read
-
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-
           prompt: |
-            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }}
+            Review pull request #${{ github.event.issue.number }} in
+            ${{ github.repository }}. Focus on correctness, security,
+            maintainability, and test coverage. Use inline review comments
+            where they add value and finish with an overall summary comment
+            on the PR. Do not approve or merge the pull request.
 
-            Treat any of these as a BLOCKING issue. When in doubt, treat the finding as blocking:
-              - Security issues (OWASP top 10, broken auth/authz, injection, XSS, secret leakage, weak crypto).
-              - Violations of the zero-knowledge invariants documented in CLAUDE.md, including but not limited to:
-                  * plaintext sent to the API instead of `_enc` fields,
-                  * encryption key or JWT written to localStorage / sessionStorage / cookies,
-                  * missing `user_id` in POST bodies for `bookmarks`, `tags`, or `thumbnail_images`,
-                  * missing `name_hmac` on tag creation,
-                  * password change that does not re-encrypt all data before calling `change_password`.
-              - Correctness bugs or regressions in existing behavior.
-              - Breaking changes to public APIs, DB schema, or RLS policies without a migration path.
-              - New logic without corresponding tests (this repo is TDD-mandatory per CLAUDE.md).
-              - Failing CI checks on the PR head.
+  issue-to-pr:
+    name: Open PR from issue on @claude pr
+    if: |
+      github.event.issue.pull_request == null &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.author_association == 'OWNER' &&
+      contains(github.event.comment.body, '@claude pr')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-            This repository requires CODEOWNERS review, so a formal Claude approval cannot satisfy
-            branch protection. ALWAYS publish the review as a COMMENT — never as `--approve` or
-            `--request-changes`:
-              gh pr review ${{ github.event.issue.number }} --comment --body "<findings>"
+      - name: Run Claude open-PR-from-issue
+        id: claude
+        # Pinned to v1.0.112 -- see comment on pr-review job above.
+        uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2 # v1.0.112
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Repository:     ${{ github.repository }}
+            Issue:          #${{ github.event.issue.number }}
+            Default branch: ${{ github.event.repository.default_branch }}
 
-            Format the body so the verdict is unambiguous on the very first line:
-              - "Verdict: LGTM — no blocking issues found." (only if zero blockers)
-              - "Verdict: CHANGES REQUESTED — N blocking issue(s) found." (otherwise)
-            Then list each blocking finding with `file:line` references under a "Blocking" heading,
-            followed by non-blocking notes under a "Suggestions" heading.
+            The repository owner commented `@claude pr` on the issue above.
+            Open a pull request from the development branch tied to that
+            issue. Steps:
 
-            Hard rule: never write "LGTM" while any blocking issue exists. If you are unsure whether
-            something is blocking, mark it blocking. Do not soften findings to justify approval.
-
-          claude_args: '--allowed-tools "Bash(gh pr:*),Bash(gh api:*)"'
+            1. Run `gh issue develop --list ${{ github.event.issue.number }}`
+               to find the development branch linked to this issue.
+            2. If no branch is linked, comment on the issue explaining that
+               no development branch is tied to it and stop. Do not create a
+               branch yourself.
+            3. If the linked branch has no commits ahead of
+               ${{ github.event.repository.default_branch }}, comment on the
+               issue explaining that and stop.
+            4. Read the issue body and inspect the diff between the linked
+               branch and ${{ github.event.repository.default_branch }}
+               (e.g. `gh issue view ${{ github.event.issue.number }}`,
+               `git diff origin/${{ github.event.repository.default_branch }}...origin/<branch>`).
+               The pull request description must be grounded in BOTH
+               sources -- never invent changes that are not in the diff,
+               and never drop context that is in the issue.
+            5. Create the pull request with `gh pr create` from the linked
+               branch into ${{ github.event.repository.default_branch }}:
+                 - Title: the issue title.
+                 - Body: a comprehensive description that
+                     (a) restates the problem or goal from the issue,
+                     (b) summarises what actually changed (group by area
+                         when the diff spans many files, name the key
+                         functions or modules touched), and
+                     (c) flags anything reviewers should look closely at
+                         (security-sensitive code, breaking behaviour,
+                         known follow-ups, test coverage gaps).
+                   End the body with
+                   "Closes #${{ github.event.issue.number }}" so the issue
+                   auto-closes on merge.
+            6. Reply to the issue with the URL of the new PR.
