@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getTags, createTag, setBookmarkTags, reencryptTag, getTagRows } from './tags';
+import { getTags, createTag, setBookmarkTags, reencryptTag, getTagRows, updateTag, MAX_TAG_LENGTH } from './tags';
 import { deriveKey, decrypt, computeHmac } from './crypto';
 import { setAuthToken } from './api';
 
@@ -243,5 +243,115 @@ describe('tags', () => {
 
     const result = await getTagRows();
     expect(result).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // MAX_TAG_LENGTH constant
+  // -------------------------------------------------------------------------
+  it('exports MAX_TAG_LENGTH = 100 (matches importJson cap)', () => {
+    expect(MAX_TAG_LENGTH).toBe(100);
+  });
+
+  // -------------------------------------------------------------------------
+  // createTag — trim fix
+  // -------------------------------------------------------------------------
+  it('createTag trims whitespace before encrypt + HMAC so padded duplicates collide', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => tagRow() });
+
+    await createTag('  Personal  ', USER_ID, key);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const decrypted = await decrypt(key, body.name_enc);
+    expect(decrypted).toBe('Personal');
+
+    const expectedHmac = await computeHmac(USER_ID, 'Personal');
+    expect(body.name_hmac).toBe(expectedHmac);
+  });
+
+  it('createTag with same plaintext but different userId produces different HMACs (multi-user dedup)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => tagRow() });
+
+    await createTag('shared', 'user-a', key);
+    const bodyA = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => tagRow() });
+
+    await createTag('shared', 'user-b', key);
+    const bodyB = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(bodyA.name_hmac).not.toBe(bodyB.name_hmac);
+  });
+
+  // -------------------------------------------------------------------------
+  // updateTag — request shape and security invariants
+  // -------------------------------------------------------------------------
+  it('updateTag PATCHes /tags?id=eq.{id} with method PATCH', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await updateTag('tag-abc', 'Renamed', USER_ID, key);
+
+    expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
+    expect(fetchMock.mock.calls[0][0] as string).toContain('/tags?id=eq.tag-abc');
+  });
+
+  it('updateTag body contains ONLY name_enc and name_hmac', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await updateTag('tag-1', 'Renamed', USER_ID, key);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(Object.keys(body).sort()).toEqual(['name_enc', 'name_hmac']);
+  });
+
+  it('updateTag does NOT include user_id in PATCH body (RLS enforces ownership)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await updateTag('tag-1', 'Renamed', USER_ID, key);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.user_id).toBeUndefined();
+  });
+
+  it('updateTag does NOT include key_version in PATCH body (encryption key unchanged on rename)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await updateTag('tag-1', 'Renamed', USER_ID, key);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.key_version).toBeUndefined();
+  });
+
+  it('updateTag re-encrypts the new name (name_enc decrypts back to the new value)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await updateTag('tag-1', 'Renamed', USER_ID, key);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const decrypted = await decrypt(key, body.name_enc);
+    expect(decrypted).toBe('Renamed');
+  });
+
+  it('updateTag re-HMACs the new name with the userId', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await updateTag('tag-1', 'Renamed', USER_ID, key);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const expectedHmac = await computeHmac(USER_ID, 'Renamed');
+    expect(body.name_hmac).toBe(expectedHmac);
+  });
+
+  it('updateTag operates on the trimmed value (whitespace-padded matches unpadded HMAC)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+
+    await updateTag('tag-1', '  Personal  ', USER_ID, key);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const decrypted = await decrypt(key, body.name_enc);
+    expect(decrypted).toBe('Personal');
+
+    const expectedHmac = await computeHmac(USER_ID, 'Personal');
+    expect(body.name_hmac).toBe(expectedHmac);
   });
 });

@@ -1,4 +1,4 @@
-import { User, KeyRound, LogOut, Trash2, Mail, Upload, Download } from "lucide-react";
+import { User, KeyRound, LogOut, Trash2, Mail, Upload, Download, Tags } from "lucide-react";
 import { useNavigate } from "react-router";
 import {
   DropdownMenu,
@@ -14,9 +14,10 @@ interface HeaderProps {
   onDeleteAccount: () => void;
   onImportBookmarks?: () => void;
   onExportBookmarks?: () => void;
+  onManageTags?: () => void;
 }
 
-export function Header({ onChangePassword, onDeleteAccount, onImportBookmarks, onExportBookmarks }: HeaderProps) {
+export function Header({ onChangePassword, onDeleteAccount, onImportBookmarks, onExportBookmarks, onManageTags }: HeaderProps) {
   const navigate = useNavigate();
   const { email, logout } = useAuth();
 
@@ -87,6 +88,14 @@ export function Header({ onChangePassword, onDeleteAccount, onImportBookmarks, o
             >
               <Download className="w-4 h-4 shrink-0" />
               Export Bookmarks
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              onSelect={onManageTags}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:text-white focus:text-white focus:bg-white/10 cursor-pointer transition-all duration-300"
+            >
+              <Tags className="w-4 h-4 shrink-0" />
+              Manage Tags
             </DropdownMenuItem>
 
             <DropdownMenuSeparator className="bg-white/10 my-1" />

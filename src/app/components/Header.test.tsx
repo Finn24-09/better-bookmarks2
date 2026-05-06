@@ -88,4 +88,14 @@ describe('Header', () => {
     await user.click(screen.getByText('Delete Account'));
     expect(onDeleteAccount).toHaveBeenCalled();
   });
+
+  it('clicking "Manage Tags" calls the onManageTags prop', async () => {
+    const onManageTags = vi.fn();
+    const user = userEvent.setup();
+    renderHeader({ onManageTags });
+    await user.click(screen.getByRole('button'));
+    await waitFor(() => expect(screen.getByText('Manage Tags')).toBeInTheDocument());
+    await user.click(screen.getByText('Manage Tags'));
+    expect(onManageTags).toHaveBeenCalled();
+  });
 });

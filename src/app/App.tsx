@@ -12,6 +12,7 @@ import { ChangePasswordModal } from "./components/ChangePasswordModal";
 import { DeleteAccountModal } from "./components/DeleteAccountModal";
 import { ImportBookmarksModal } from "./components/ImportBookmarksModal";
 import { ExportBookmarksModal } from "./components/ExportBookmarksModal";
+import { ManageTagsModal } from "./components/ManageTagsModal";
 import { EmailVerificationBanner } from "./components/EmailVerificationBanner";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { useAuth } from "./contexts/AuthContext";
@@ -92,6 +93,7 @@ function AppContent() {
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [manageTagsOpen, setManageTagsOpen] = useState(false);
 
   const handleOpenAdd = () => {
     setEditingBookmark(null);
@@ -144,6 +146,7 @@ function AppContent() {
         onDeleteAccount={() => setDeleteAccountOpen(true)}
         onImportBookmarks={() => setImportOpen(true)}
         onExportBookmarks={() => setExportOpen(true)}
+        onManageTags={() => setManageTagsOpen(true)}
       />
       {!emailVerified && <EmailVerificationBanner />}
 
@@ -267,6 +270,20 @@ function AppContent() {
       <ExportBookmarksModal
         open={exportOpen}
         onClose={() => setExportOpen(false)}
+      />
+
+      <ManageTagsModal
+        open={manageTagsOpen}
+        tags={tags}
+        bookmarks={bookmarks}
+        onClose={() => setManageTagsOpen(false)}
+        onSave={refresh}
+        onTagDeleted={(id) => {
+          // Clear the active filter only if it referenced the deleted tag.
+          // Driven by an explicit callback (not derived from the next tags
+          // array) so the reset is deterministic regardless of fetch timing.
+          if (selectedTagId === id) setSelectedTagId(null);
+        }}
       />
     </div>
   );
