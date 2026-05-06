@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TagMultiSelect } from './TagMultiSelect';
 import type { Tag } from '../../lib/tags';
+import { Popover } from './ui/popover';
 
 // Spy on the local Popover wrapper so we can assert that TagMultiSelect
 // opts into modal mode. modal={true} is what makes Radix wrap the popover
@@ -12,8 +13,6 @@ vi.mock('./ui/popover', async () => {
   const actual = await vi.importActual<typeof import('./ui/popover')>('./ui/popover');
   return { ...actual, Popover: vi.fn(actual.Popover) };
 });
-
-import { Popover } from './ui/popover';
 
 function makeTags(names: string[]): Tag[] {
   return names.map((name, i) => ({ id: `tag-${i + 1}`, name }));
