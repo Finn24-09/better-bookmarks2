@@ -227,3 +227,20 @@ EXCEPTION
   WHEN undefined_object THEN
     RAISE WARNING 'thumbnail_images_data_enc_size_cap not found at VALIDATE time -- ADD CONSTRAINT did not complete or constraint was dropped; re-run migration to retry';
 END $$;
+
+-- =============================================================================
+-- Operator note: NOT VALID after upgrade is a data-quality alert
+--
+-- After this file runs against an existing populated DB, any constraint left
+-- in NOT VALID state means the section-2 VALIDATE block emitted a WARNING
+-- (either check_violation or undefined_object — see the per-block messages
+-- above). NOT VALID is NOT a benign migration state to ignore: every new
+-- INSERT/UPDATE is still bounded by the cap, but pre-existing rows that
+-- exceed it remain in the table until cleaned up.
+--
+-- Treat any post-upgrade WARNING as actionable. Identify the offending rows
+-- with octet_length(<column>) > <cap> on the relevant table, decide per-row
+-- whether to delete or to have the user re-encrypt with smaller plaintext
+-- (the server has no key, so the operator cannot rewrite the ciphertext),
+-- then re-run this file to retry VALIDATE.
+-- =============================================================================
