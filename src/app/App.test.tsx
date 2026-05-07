@@ -24,12 +24,21 @@ vi.mock('./contexts/AuthContext', () => ({
   }),
 }));
 
-vi.mock('../lib/bookmarks', () => ({
-  createBookmark: vi.fn(),
-  updateBookmark: vi.fn(),
-  deleteBookmark: vi.fn(),
-  getBookmarks: vi.fn(),
-}));
+// Partial mock via vi.importActual so real exports (MAX_TITLE_LENGTH /
+// MAX_URL_LENGTH) survive — App renders BookmarkFormModal which reads them
+// at render time. A flat-object replacement leaves them `undefined`, so the
+// HTML maxLength becomes NaN and the inline error string interpolates the
+// literal "undefined" — silent UX regression rather than a crash.
+vi.mock('../lib/bookmarks', async () => {
+  const actual = await vi.importActual<typeof import('../lib/bookmarks')>('../lib/bookmarks');
+  return {
+    ...actual,
+    createBookmark: vi.fn(),
+    updateBookmark: vi.fn(),
+    deleteBookmark: vi.fn(),
+    getBookmarks: vi.fn(),
+  };
+});
 
 vi.mock('../lib/tags', () => ({
   createTag: vi.fn(),

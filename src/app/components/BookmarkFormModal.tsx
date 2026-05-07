@@ -11,7 +11,7 @@ import {
 } from "./ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
-import { createBookmark, updateBookmark, deleteBookmark } from "../../lib/bookmarks";
+import { createBookmark, updateBookmark, deleteBookmark, MAX_TITLE_LENGTH, MAX_URL_LENGTH } from "../../lib/bookmarks";
 import { createTag, setBookmarkTags, Tag } from "../../lib/tags";
 import { uploadThumbnail, deleteThumbnailImage } from "../../lib/thumbnails";
 import { useAuth } from "../contexts/AuthContext";
@@ -259,7 +259,17 @@ export function BookmarkFormModal({
                   type="text"
                   placeholder="Enter bookmark title…"
                   className={errors.title ? errorInputCls : inputCls}
-                  {...register("title", { required: "Title is required" })}
+                  // +1 lets the user type one char past the cap so the inline error appears
+                  // visibly, instead of the input silently swallowing keystrokes at the
+                  // boundary (mirrors the ManageTagsModal rename input pattern).
+                  maxLength={MAX_TITLE_LENGTH + 1}
+                  {...register("title", {
+                    required: "Title is required",
+                    maxLength: {
+                      value: MAX_TITLE_LENGTH,
+                      message: `Title must be ${MAX_TITLE_LENGTH} characters or fewer`,
+                    },
+                  })}
                 />
                 {errors.title && (
                   <p className="text-xs text-red-400">{errors.title.message}</p>
@@ -272,8 +282,13 @@ export function BookmarkFormModal({
                   type="url"
                   placeholder="https://…"
                   className={errors.url ? errorInputCls : inputCls}
+                  maxLength={MAX_URL_LENGTH + 1}
                   {...register("url", {
                     required: "URL is required",
+                    maxLength: {
+                      value: MAX_URL_LENGTH,
+                      message: `URL must be ${MAX_URL_LENGTH} characters or fewer`,
+                    },
                     validate: (v) => {
                       try {
                         const u = new URL(v);
@@ -302,7 +317,12 @@ export function BookmarkFormModal({
                       type="url"
                       placeholder="https://…"
                       className={errors.thumbnailUrl ? errorInputCls : inputCls}
+                      maxLength={MAX_URL_LENGTH + 1}
                       {...register("thumbnailUrl", {
+                        maxLength: {
+                          value: MAX_URL_LENGTH,
+                          message: `URL must be ${MAX_URL_LENGTH} characters or fewer`,
+                        },
                         validate: (v) => {
                           if (!v) return true;
                           return /^https?:\/\//i.test(v) || "Only http:// or https:// URLs are allowed";

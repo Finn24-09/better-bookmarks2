@@ -14,11 +14,21 @@ vi.mock('../contexts/AuthContext', () => ({
   }),
 }));
 
-vi.mock('../../lib/bookmarks', () => ({
-  createBookmark: vi.fn(),
-  updateBookmark: vi.fn(),
-  deleteBookmark: vi.fn(),
-}));
+// Use a partial mock (vi.importActual) so real module exports — including
+// MAX_TITLE_LENGTH and MAX_URL_LENGTH used at render time by BookmarkFormModal
+// — stay intact. With a flat-object mock both constants would resolve to
+// `undefined`: the component renders without crashing, but maxLength becomes
+// `undefined + 1` (NaN, browsers ignore it) and the error message string
+// interpolates the literal "undefined". The validators silently disable.
+vi.mock('../../lib/bookmarks', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/bookmarks')>('../../lib/bookmarks');
+  return {
+    ...actual,
+    createBookmark: vi.fn(),
+    updateBookmark: vi.fn(),
+    deleteBookmark: vi.fn(),
+  };
+});
 
 vi.mock('../../lib/tags', () => ({
   createTag: vi.fn(),
@@ -391,5 +401,27 @@ describe('BookmarkFormModal', () => {
       expect(deleteBookmark).toHaveBeenCalledWith('bm-2');
       expect(deleteThumbnailImage).toHaveBeenCalledWith('img-existing');
     });
+  });
+
+  it('shows inline error when title exceeds MAX_TITLE_LENGTH instead of submitting', async () => {
+    render(<BookmarkFormModal open onClose={() => {}} availableTags={AVAILABLE_TAGS} onSave={() => {}} />);
+
+    // The HTML maxLength on the input is MAX_TITLE_LENGTH + 1 = 501, so a 501-char
+    // value can be set; one over the validator's cap so the inline error fires.
+    fireEvent.change(screen.getByPlaceholderText('Enter bookmark title\u2026'), {
+      target: { value: 'a'.repeat(501) },
+    });
+    // Required URL too, otherwise required validator wins ahead of maxLength.
+    // getAllByPlaceholderText(...)[0] mirrors the existing tests in this file —
+    // the URL field and the thumbnailUrl field share the placeholder
+    // 'https://\u2026' so getByPlaceholderText would throw.
+    fireEvent.change(screen.getAllByPlaceholderText('https://\u2026')[0], {
+      target: { value: 'https://example.com' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+
+    expect(await screen.findByText(/500 characters or fewer/i)).toBeInTheDocument();
+    expect(createBookmark).not.toHaveBeenCalled();
   });
 });
