@@ -8,7 +8,7 @@ import { encrypt, decrypt } from './crypto';
 // Single source of truth shared by BookmarkFormModal and the JSON/CSV importers.
 export const MAX_TITLE_LENGTH = 500;
 
-// Covers both url_enc and thumbnail_url_enc — same DB ceiling for both.
+// Covers both url_enc and thumbnail_url_enc; raising this requires recomputing the 16 KiB DB cap in docker/db/init/12_encrypted_column_size_caps.sql.
 export const MAX_URL_LENGTH = 2000;
 
 // ---------------------------------------------------------------------------
