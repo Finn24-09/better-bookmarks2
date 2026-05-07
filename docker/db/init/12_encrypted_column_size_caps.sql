@@ -247,4 +247,19 @@ END $$;
 -- whether to delete or to have the user re-encrypt with smaller plaintext
 -- (the server has no key, so the operator cannot rewrite the ciphertext),
 -- then re-run this file to retry VALIDATE.
+--
+-- One-liner to identify which size-cap constraints are still NOT VALID
+-- after a run (i.e. which constraints emitted a WARNING and need follow-up):
+--
+--   SELECT t.relname, c.conname
+--   FROM pg_constraint c
+--   JOIN pg_class t      ON t.oid = c.conrelid
+--   JOIN pg_namespace n  ON n.oid = t.relnamespace
+--   WHERE n.nspname = 'api'
+--     AND c.conname LIKE '%_size_cap'
+--     AND NOT c.convalidated;
+--
+-- An empty result means every constraint validated cleanly. Any rows
+-- returned name the (table, constraint) pairs that still need the data
+-- cleanup + re-run cycle described above.
 -- =============================================================================
