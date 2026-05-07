@@ -14,12 +14,7 @@ vi.mock('../contexts/AuthContext', () => ({
   }),
 }));
 
-// Use a partial mock (vi.importActual) so real module exports — including
-// MAX_TITLE_LENGTH and MAX_URL_LENGTH used at render time by BookmarkFormModal
-// — stay intact. With a flat-object mock both constants would resolve to
-// `undefined`: the component renders without crashing, but maxLength becomes
-// `undefined + 1` (NaN, browsers ignore it) and the error message string
-// interpolates the literal "undefined". The validators silently disable.
+// Partial mock (vi.importActual) keeps real MAX_*_LENGTH exports intact; flat mock would set them undefined and silently disable the maxLength validators (NaN attribute + "undefined characters or fewer" error string).
 vi.mock('../../lib/bookmarks', async () => {
   const actual = await vi.importActual<typeof import('../../lib/bookmarks')>('../../lib/bookmarks');
   return {
@@ -30,10 +25,15 @@ vi.mock('../../lib/bookmarks', async () => {
   };
 });
 
-vi.mock('../../lib/tags', () => ({
-  createTag: vi.fn(),
-  setBookmarkTags: vi.fn(),
-}));
+// Partial mock (vi.importActual) keeps real MAX_TAG_LENGTH export intact; flat mock would break TagMultiSelect's render-time length check.
+vi.mock('../../lib/tags', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/tags')>('../../lib/tags');
+  return {
+    ...actual,
+    createTag: vi.fn(),
+    setBookmarkTags: vi.fn(),
+  };
+});
 
 vi.mock('../../lib/thumbnails', () => ({
   uploadThumbnail: vi.fn(),

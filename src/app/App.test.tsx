@@ -24,11 +24,7 @@ vi.mock('./contexts/AuthContext', () => ({
   }),
 }));
 
-// Partial mock via vi.importActual so real exports (MAX_TITLE_LENGTH /
-// MAX_URL_LENGTH) survive — App renders BookmarkFormModal which reads them
-// at render time. A flat-object replacement leaves them `undefined`, so the
-// HTML maxLength becomes NaN and the inline error string interpolates the
-// literal "undefined" — silent UX regression rather than a crash.
+// Partial mock (vi.importActual) keeps MAX_*_LENGTH exports intact; flat mock would silently disable BookmarkFormModal's maxLength validators (NaN attribute, "undefined characters or fewer" error string).
 vi.mock('../lib/bookmarks', async () => {
   const actual = await vi.importActual<typeof import('../lib/bookmarks')>('../lib/bookmarks');
   return {
@@ -40,11 +36,16 @@ vi.mock('../lib/bookmarks', async () => {
   };
 });
 
-vi.mock('../lib/tags', () => ({
-  createTag: vi.fn(),
-  setBookmarkTags: vi.fn(),
-  getTags: vi.fn(),
-}));
+// Partial mock (vi.importActual) keeps real MAX_TAG_LENGTH export intact; flat mock would break TagMultiSelect's render-time length check (App transitively renders BookmarkFormModal → TagMultiSelect).
+vi.mock('../lib/tags', async () => {
+  const actual = await vi.importActual<typeof import('../lib/tags')>('../lib/tags');
+  return {
+    ...actual,
+    createTag: vi.fn(),
+    setBookmarkTags: vi.fn(),
+    getTags: vi.fn(),
+  };
+});
 
 // Header uses useNavigate for Log Out
 vi.mock('react-router', async (importOriginal) => {

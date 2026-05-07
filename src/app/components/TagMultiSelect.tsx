@@ -10,7 +10,7 @@ import {
   CommandEmpty,
 } from "./ui/command";
 import { cn } from "./ui/utils";
-import type { Tag } from "../../lib/tags";
+import { MAX_TAG_LENGTH, type Tag } from "../../lib/tags";
 
 interface TagMultiSelectProps {
   available: Tag[];
@@ -37,13 +37,20 @@ export function TagMultiSelect({
     t.name.toLowerCase().includes(search.toLowerCase()),
   );
 
+  const trimmedSearch = search.trim();
   const showCreate =
     onCreateTag &&
-    search.trim() !== "" &&
-    !available.some((t) => t.name.toLowerCase() === search.trim().toLowerCase());
+    trimmedSearch !== "" &&
+    trimmedSearch.length <= MAX_TAG_LENGTH &&
+    !available.some((t) => t.name.toLowerCase() === trimmedSearch.toLowerCase());
+
+  const overLengthHint =
+    onCreateTag && trimmedSearch.length > MAX_TAG_LENGTH;
 
   const handleCreate = async () => {
-    if (!onCreateTag || !search.trim()) return;
+    const trimmed = search.trim();
+    // Length gate is also enforced by hiding the Create item; this self-defends against future programmatic invokers (keyboard shortcuts etc.).
+    if (!onCreateTag || !trimmed || trimmed.length > MAX_TAG_LENGTH) return;
     setCreating(true);
     try {
       const newTag = await onCreateTag(search.trim());
@@ -101,13 +108,19 @@ export function TagMultiSelect({
               placeholder="Search tags…"
               value={search}
               onValueChange={setSearch}
+              maxLength={MAX_TAG_LENGTH + 1}
               className="text-white/90 placeholder:text-white/40 text-sm"
             />
             <CommandList className="max-h-50 overflow-y-auto overscroll-contain touch-pan-y p-1">
-              {filtered.length === 0 && !showCreate && (
+              {filtered.length === 0 && !showCreate && !overLengthHint && (
                 <CommandEmpty className="py-6 text-center text-sm text-white/40">
                   No tags found.
                 </CommandEmpty>
+              )}
+              {overLengthHint && (
+                <div className="py-3 px-3 text-center text-xs text-red-400" role="alert">
+                  Tag name must be {MAX_TAG_LENGTH} characters or fewer
+                </div>
               )}
               <CommandGroup>
                 {filtered.map((tag) => {

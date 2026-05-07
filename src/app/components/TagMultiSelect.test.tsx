@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TagMultiSelect } from './TagMultiSelect';
-import type { Tag } from '../../lib/tags';
+import { MAX_TAG_LENGTH, type Tag } from '../../lib/tags';
 import { Popover } from './ui/popover';
 
 // Spy on the local Popover wrapper so we can assert that TagMultiSelect
@@ -154,6 +154,33 @@ describe('TagMultiSelect', () => {
       expect(onCreateTag).toHaveBeenCalledWith('Vue');
       expect(onChange).toHaveBeenCalledWith(['tag-new']);
     });
+  });
+
+  it('hides the Create option and shows an inline error when the search exceeds MAX_TAG_LENGTH', async () => {
+    const user = userEvent.setup();
+    const onCreateTag = vi.fn();
+    render(
+      <TagMultiSelect
+        available={[]}
+        selected={[]}
+        onChange={vi.fn()}
+        onCreateTag={onCreateTag}
+      />,
+    );
+
+    await user.click(screen.getByRole('combobox'));
+
+    // The CommandInput has HTML maxLength = MAX_TAG_LENGTH + 1 = 101, so
+    // typing past that point is clamped by the browser. Set the value
+    // directly via fireEvent.change to simulate a paste / autofill that
+    // bypasses the HTML attribute (the test's job is to verify the JS
+    // length guard, not the HTML clamp).
+    const input = screen.getByPlaceholderText('Search tags…') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'a'.repeat(MAX_TAG_LENGTH + 1) } });
+
+    expect(screen.getByText(/100 characters or fewer/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Create "/i)).not.toBeInTheDocument();
+    expect(onCreateTag).not.toHaveBeenCalled();
   });
 
   it('selected tags are shown as pills below the trigger', () => {
