@@ -150,6 +150,32 @@ describe('apiFetch', () => {
     expect(err.message).toBe('Authentication required. Please sign in.');
   });
 
+  it('throws ApiError with generic message for 400 on non-auth paths (issue #23: constraint name does not leak)', async () => {
+    // PostgREST forwards check_violation as 400 with body
+    // { code: '23514', message: '...', details: '...', hint: null }
+    // where the message includes the constraint name. We must NOT relay this
+    // body verbatim — only auth RPCs are allowed to surface 400 messages.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        code: '23514',
+        message: 'new row for relation "tags" violates check constraint "tags_name_enc_size_cap"',
+        details: 'Failing row contains (...).',
+        hint: null,
+      }),
+    }));
+
+    const err = await apiFetch('/tags?id=eq.abc', { method: 'PATCH' }).catch((e) => e) as ApiError;
+
+    expect(err.status).toBe(400);
+    expect(err.message).toBe('Request failed (400)');
+    // Belt-and-braces: even if the future fallback message changes, the
+    // constraint name itself must never reach the user.
+    expect(err.message).not.toContain('tags_name_enc_size_cap');
+    expect(err.message).not.toContain('check constraint');
+  });
+
   it('throws ApiError with fallback message when error body is not JSON', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
