@@ -147,6 +147,18 @@ describe('parseCsvText — valid rows', () => {
     expect(result.valid[0].thumbnailUrl).not.toBeNull();
     expect(result.valid[0].thumbnailUrl).toHaveLength(2000);
   });
+
+  it('truncates tag names longer than MAX_TAG_LENGTH (100) to 100 characters', () => {
+    // Mirrors the title/url/thumbnail-url truncation tests above. Locks the
+    // contract that csv.ts uses the imported MAX_TAG_LENGTH and not a stale
+    // hardcoded value, parallel to importJson.ts:197.
+    const longTag = 'a'.repeat(150);
+    const csv = '"Title","URL","Tags"\n"T","https://example.com","' + longTag + '"';
+    const result = parseCsvText(csv);
+    expect(result.valid).toHaveLength(1);
+    expect(result.valid[0].tags).toHaveLength(1);
+    expect(result.valid[0].tags[0]).toHaveLength(100);
+  });
 });
 
 // ---------------------------------------------------------------------------

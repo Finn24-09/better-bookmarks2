@@ -10,6 +10,7 @@
 
 import { parseHttpUrl } from './url';
 import { MAX_TITLE_LENGTH, MAX_URL_LENGTH } from './bookmarks';
+import { MAX_TAG_LENGTH } from './tags';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_ROWS = 500;
@@ -185,7 +186,7 @@ export function parseCsvText(text: string): CsvParseResult {
     const rawTags = tagsIdx !== -1 ? (cols[tagsIdx] ?? '') : '';
     const tags = rawTags
       .split('|')
-      .map((t) => t.trim().slice(0, 100))
+      .map((t) => t.trim().slice(0, MAX_TAG_LENGTH))
       .filter((t) => t.length > 0);
 
     // Thumbnail URL: silently drop if not http/https
