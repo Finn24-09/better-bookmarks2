@@ -164,6 +164,38 @@ describe('bookmarks', () => {
   });
 
   // -------------------------------------------------------------------------
+  // updateBookmark — server rejects oversized title_enc (issue #23)
+  // -------------------------------------------------------------------------
+  it('updateBookmark surfaces a sanitised ApiError when the server rejects an oversized title_enc with 400', async () => {
+    // Same shape as the createBookmark sanitisation test above and the
+    // updateTag one in tags.test.ts -- locks the contract that
+    // bookmarks_title_enc_size_cap rejection messages don't leak the
+    // constraint name or table name through the updateBookmark call site
+    // either.
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        code: '23514',
+        message:
+          'new row for relation "bookmarks" violates check constraint "bookmarks_title_enc_size_cap"',
+        details: 'Failing row contains (..., <oversized base64 blob>, ...).',
+        hint: null,
+      }),
+    });
+
+    const caught = await updateBookmark('bm-abc', { title: 'T', url: 'https://x.com' }, key).catch((e) => e) as ApiError;
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught.status).toBe(400);
+    expect(caught.message).toBe('Request failed (400)');
+    expect(caught.message).not.toContain('bookmarks_title_enc_size_cap');
+    expect(caught.message).not.toContain('relation "bookmarks"');
+    expect(caught.message).not.toContain('check constraint');
+    expect(caught.message).not.toContain('Failing row');
+  });
+
+  // -------------------------------------------------------------------------
   // updateBookmark — request method + URL
   // -------------------------------------------------------------------------
   it('updateBookmark sends a PATCH request', async () => {

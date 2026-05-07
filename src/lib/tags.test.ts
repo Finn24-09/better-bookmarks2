@@ -384,4 +384,35 @@ describe('tags', () => {
     expect(caught.message).not.toContain('tags_name_enc_size_cap');
     expect(caught.message).not.toContain('relation "tags"');
   });
+
+  // -------------------------------------------------------------------------
+  // createTag — server rejects oversized name_enc (issue #23)
+  // -------------------------------------------------------------------------
+  it('createTag surfaces a sanitised ApiError when the server rejects an oversized name_enc with 400', async () => {
+    // Same shape as the updateTag sanitisation test above and the
+    // createBookmark one in bookmarks.test.ts -- locks the contract that
+    // tags_name_enc_size_cap rejection messages don't leak the constraint
+    // name or table name through the createTag call site either.
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        code: '23514',
+        message:
+          'new row for relation "tags" violates check constraint "tags_name_enc_size_cap"',
+        details: 'Failing row contains (..., <oversized base64 blob>, ...).',
+        hint: null,
+      }),
+    });
+
+    const caught = await createTag('work', USER_ID, key).catch((e) => e) as ApiError;
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught.status).toBe(400);
+    expect(caught.message).toBe('Request failed (400)');
+    expect(caught.message).not.toContain('tags_name_enc_size_cap');
+    expect(caught.message).not.toContain('relation "tags"');
+    expect(caught.message).not.toContain('check constraint');
+    expect(caught.message).not.toContain('Failing row');
+  });
 });
