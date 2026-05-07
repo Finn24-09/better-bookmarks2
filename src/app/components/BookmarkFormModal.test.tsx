@@ -424,4 +424,55 @@ describe('BookmarkFormModal', () => {
     expect(await screen.findByText(/500 characters or fewer/i)).toBeInTheDocument();
     expect(createBookmark).not.toHaveBeenCalled();
   });
+
+  it('shows inline error when URL exceeds MAX_URL_LENGTH instead of submitting', async () => {
+    render(<BookmarkFormModal open onClose={() => {}} availableTags={AVAILABLE_TAGS} onSave={() => {}} />);
+
+    // Title is required — provide a valid one so the URL maxLength validator
+    // is what fires, not the title required check.
+    fireEvent.change(screen.getByPlaceholderText('Enter bookmark title\u2026'), {
+      target: { value: 'A title' },
+    });
+
+    // Build a 2001-char URL. The HTML maxLength on the input is
+    // MAX_URL_LENGTH + 1 = 2001, so the value can be set; one over the
+    // validator's cap so the inline error fires. The leading 'https://'
+    // ensures the value would otherwise pass the URL-format validator —
+    // the test thereby also confirms that react-hook-form runs maxLength
+    // before validate (the documented rule order).
+    const longUrl = 'https://example.com/' + 'a'.repeat(1981);
+    expect(longUrl.length).toBe(2001);
+    fireEvent.change(screen.getAllByPlaceholderText('https://\u2026')[0], {
+      target: { value: longUrl },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+
+    expect(await screen.findByText(/2000 characters or fewer/i)).toBeInTheDocument();
+    expect(createBookmark).not.toHaveBeenCalled();
+  });
+
+  it('shows inline error when thumbnail URL exceeds MAX_URL_LENGTH instead of submitting', async () => {
+    render(<BookmarkFormModal open onClose={() => {}} availableTags={AVAILABLE_TAGS} onSave={() => {}} />);
+
+    // Title and URL are required for submit to even reach the thumbnail field's
+    // validators — provide valid values for both.
+    fireEvent.change(screen.getByPlaceholderText('Enter bookmark title\u2026'), {
+      target: { value: 'A title' },
+    });
+    const inputs = screen.getAllByPlaceholderText('https://\u2026');
+    fireEvent.change(inputs[0], { target: { value: 'https://example.com' } });
+
+    // Thumbnail URL field is the second input with the 'https://\u2026' placeholder
+    // (URL field is first). 'https://thumb.example.com/' is 26 chars;
+    // 26 + 1975 = 2001 — one over MAX_URL_LENGTH so the validator fires.
+    const longThumb = 'https://thumb.example.com/' + 'a'.repeat(1975);
+    expect(longThumb.length).toBe(2001);
+    fireEvent.change(inputs[1], { target: { value: longThumb } });
+
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+
+    expect(await screen.findByText(/2000 characters or fewer/i)).toBeInTheDocument();
+    expect(createBookmark).not.toHaveBeenCalled();
+  });
 });
