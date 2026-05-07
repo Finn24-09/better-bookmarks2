@@ -199,9 +199,10 @@ describe('bookmarks', () => {
   // createBookmark — server rejects oversized url_enc (issue #23)
   // -------------------------------------------------------------------------
   it('createBookmark surfaces a sanitised ApiError when the server rejects an oversized url_enc with 400', async () => {
-    // Same shape as the title_enc tests above; uses bookmarks_url_enc_size_cap
-    // as the constraint name so all six size-cap constraints have explicit
-    // named coverage of the api.ts sanitisation contract.
+    // Pairs with the title_enc test above; together they give every bookmarks-
+    // table size-cap constraint named coverage. tags_name_enc_size_cap is
+    // covered in tags.test.ts; the two thumbnail_images_* constraints are
+    // covered indirectly via api.test.ts's generic non-auth 400 test.
     fetchMock.mockResolvedValue({
       ok: false,
       status: 400,
@@ -220,6 +221,39 @@ describe('bookmarks', () => {
     expect(caught.status).toBe(400);
     expect(caught.message).toBe('Request failed (400)');
     expect(caught.message).not.toContain('bookmarks_url_enc_size_cap');
+    expect(caught.message).not.toContain('relation "bookmarks"');
+    expect(caught.message).not.toContain('check constraint');
+    expect(caught.message).not.toContain('Failing row');
+  });
+
+  // -------------------------------------------------------------------------
+  // createBookmark — server rejects oversized thumbnail_url_enc (issue #23)
+  // -------------------------------------------------------------------------
+  it('createBookmark surfaces a sanitised ApiError when the server rejects an oversized thumbnail_url_enc with 400', async () => {
+    // Closes the named-coverage loop for the third bookmarks-table constraint
+    // (bookmarks_thumbnail_url_enc_size_cap). Same sanitisation contract.
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        code: '23514',
+        message:
+          'new row for relation "bookmarks" violates check constraint "bookmarks_thumbnail_url_enc_size_cap"',
+        details: 'Failing row contains (..., <oversized base64 blob>, ...).',
+        hint: null,
+      }),
+    });
+
+    const caught = await createBookmark(
+      { title: TITLE, url: URL, thumbnailUrl: 'https://thumb.example.com/' },
+      key,
+      USER_ID,
+    ).catch((e) => e) as ApiError;
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught.status).toBe(400);
+    expect(caught.message).toBe('Request failed (400)');
+    expect(caught.message).not.toContain('bookmarks_thumbnail_url_enc_size_cap');
     expect(caught.message).not.toContain('relation "bookmarks"');
     expect(caught.message).not.toContain('check constraint');
     expect(caught.message).not.toContain('Failing row');
