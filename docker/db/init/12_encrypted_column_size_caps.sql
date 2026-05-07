@@ -24,8 +24,8 @@
 -- limit.
 --
 --   tags.name_enc                       4 KiB  | 100-char MAX_TAG_LENGTH
---   bookmarks.title_enc                 8 KiB  | 500-char MAX_TITLE_LENGTH (importJson)
---   bookmarks.url_enc                  16 KiB  | 2000-char MAX_URL_LENGTH (importJson)
+--   bookmarks.title_enc                 8 KiB  | 500-char MAX_TITLE_LENGTH (bookmarks.ts)
+--   bookmarks.url_enc                  16 KiB  | 2000-char MAX_URL_LENGTH (bookmarks.ts)
 --   bookmarks.thumbnail_url_enc        16 KiB  | same shape as url_enc
 --   thumbnail_images.original_name_enc  4 KiB  | 255-char filename slice
 --   thumbnail_images.data_enc           4 MiB  | 2.0x above Nginx client_max_body_size 2M
