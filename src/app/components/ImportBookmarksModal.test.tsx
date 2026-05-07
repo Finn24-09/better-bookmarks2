@@ -22,9 +22,18 @@ vi.mock('../../lib/tags', () => ({
   MAX_TAG_LENGTH: 100,
 }));
 
-vi.mock('../../lib/bookmarks', () => ({
-  createBookmark: vi.fn(),
-}));
+// Partial mock via vi.importActual so real exports (MAX_TITLE_LENGTH /
+// MAX_URL_LENGTH) survive. ImportBookmarksModal imports from importJson.ts
+// (line 12 of the source), which itself imports those two constants from
+// bookmarks.ts; a flat-object replacement makes them undefined at module
+// load time and the dependent slice() calls in importJson.ts misbehave.
+vi.mock('../../lib/bookmarks', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/bookmarks')>('../../lib/bookmarks');
+  return {
+    ...actual,
+    createBookmark: vi.fn(),
+  };
+});
 
 vi.mock('../../lib/thumbnails', () => ({
   uploadThumbnailFromBytes: vi.fn(),

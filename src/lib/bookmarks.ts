@@ -2,6 +2,26 @@ import { apiFetch } from './api';
 import { encrypt, decrypt } from './crypto';
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum allowed length (in characters) for a bookmark title.
+ * Single source of truth shared between the interactive form
+ * (`BookmarkFormModal`) and the JSON / CSV importers — keeps validation
+ * messages consistent across all write paths.
+ */
+export const MAX_TITLE_LENGTH = 500;
+
+/**
+ * Maximum allowed length (in characters) for a bookmark URL or
+ * thumbnail URL. The same cap covers both fields because they're
+ * stored as `url_enc` / `thumbnail_url_enc` with identical DB
+ * ceilings.
+ */
+export const MAX_URL_LENGTH = 2000;
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
