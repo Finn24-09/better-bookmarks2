@@ -12,11 +12,10 @@
 
 import { parseHttpUrl } from './url';
 import { MAX_TAG_LENGTH } from './tags';
+import { MAX_TITLE_LENGTH, MAX_URL_LENGTH } from './bookmarks';
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB — large enough for full thumbnail export
 const MAX_BOOKMARKS = 5000;
-const MAX_TITLE_LENGTH = 500;
-const MAX_URL_LENGTH = 2000;
 const MAX_TAGS_PER_BOOKMARK = 50;
 const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024; // 5 MB decoded
 const JPEG_DATA_URI_PREFIX = 'data:image/jpeg;base64,';

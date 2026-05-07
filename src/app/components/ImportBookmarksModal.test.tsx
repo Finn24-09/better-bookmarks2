@@ -13,18 +13,25 @@ vi.mock('../contexts/AuthContext', () => ({
   }),
 }));
 
-vi.mock('../../lib/tags', () => ({
-  getTags: vi.fn(),
-  createTag: vi.fn(),
-  setBookmarkTags: vi.fn(),
-  // MAX_TAG_LENGTH is re-exported from tags.ts and consumed by importJson.ts;
-  // factory mocks must include it or import-time evaluation breaks parsing.
-  MAX_TAG_LENGTH: 100,
-}));
+// Partial mock (vi.importActual) keeps real MAX_TAG_LENGTH export intact; flat mock with a hardcoded value would silently lie if the constant ever changed.
+vi.mock('../../lib/tags', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/tags')>('../../lib/tags');
+  return {
+    ...actual,
+    getTags: vi.fn(),
+    createTag: vi.fn(),
+    setBookmarkTags: vi.fn(),
+  };
+});
 
-vi.mock('../../lib/bookmarks', () => ({
-  createBookmark: vi.fn(),
-}));
+// Partial mock (vi.importActual) keeps MAX_*_LENGTH exports intact; flat mock would set them undefined, breaking the slice(0, MAX_…) calls in importJson.ts (which this component imports transitively).
+vi.mock('../../lib/bookmarks', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/bookmarks')>('../../lib/bookmarks');
+  return {
+    ...actual,
+    createBookmark: vi.fn(),
+  };
+});
 
 vi.mock('../../lib/thumbnails', () => ({
   uploadThumbnailFromBytes: vi.fn(),
