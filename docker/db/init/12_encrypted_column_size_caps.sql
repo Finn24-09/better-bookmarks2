@@ -1,16 +1,17 @@
 -- =============================================================================
 -- Server-side length caps on application-encrypted columns.
 --
--- Defense-in-depth: the frontend caps tag names client-side
--- (MAX_TAG_LENGTH = 100 in src/lib/tags.ts) and the JSON / CSV importers cap
--- title, url, filename, and thumbnail bytes (src/lib/importJson.ts,
--- src/lib/csv.ts), but the interactive bookmark form does NOT length-cap
--- title or URL, and a malicious or compromised client can bypass any
--- client-side cap and POST/PATCH a multi-megabyte ciphertext directly
--- through PostgREST. RLS still confines the impact to the attacker's own
--- account, but the unbounded write surface lets one compromised session
--- bloat that user's storage indefinitely. These CHECK constraints bound
--- the ciphertext size at the database layer.
+-- Defense-in-depth: the frontend caps every plaintext field client-side
+-- (MAX_TAG_LENGTH in src/lib/tags.ts; MAX_TITLE_LENGTH and MAX_URL_LENGTH
+-- in src/lib/bookmarks.ts, consumed by BookmarkFormModal.tsx and the
+-- JSON / CSV importers in src/lib/importJson.ts and src/lib/csv.ts), but
+-- a malicious or compromised client can bypass any client-side cap and
+-- POST/PATCH a multi-megabyte ciphertext directly through PostgREST.
+-- RLS still confines the impact to the attacker's own account, but the
+-- unbounded write surface lets one compromised session bloat that user's
+-- storage indefinitely. These CHECK constraints bound the ciphertext size
+-- at the database layer — the authoritative gate for any client that
+-- ignores or bypasses the frontend validators.
 --
 -- Each ceiling is sized to the worst-case AES-GCM ciphertext for the
 -- corresponding plaintext cap, expanded by base64 (≈1.34x), with at least
@@ -24,18 +25,23 @@
 --   thumbnail_images.original_name_enc  4 KiB  | 255-char filename slice
 --   thumbnail_images.data_enc           4 MiB  | ~2.1x above Nginx client_max_body_size 2M
 --
--- The interactive bookmark form does NOT length-cap title or URL client-side;
--- for that path the DB caps are the only ceiling. data_enc's 4 MiB cap sits
--- above the Nginx body limit so no currently-storeable row fails validation,
--- while still bounding the DB-layer DoS surface for any future operator who
--- bypasses Nginx.
+-- The interactive bookmark form length-caps title and URL client-side via
+-- react-hook-form maxLength validators (BookmarkFormModal.tsx); the DB caps
+-- below are the authoritative gate for any client that bypasses the form.
+-- data_enc's 4 MiB cap sits above the Nginx 2 MiB body limit so no
+-- currently-storeable row fails validation, while still bounding the
+-- DB-layer DoS surface for any future operator who bypasses Nginx.
 --
 -- Migration shape:
 --  1. ADD CONSTRAINT ... NOT VALID  → enforced on new writes immediately,
---     skips existing-row scan so a populated upgrade DB doesn't lock.
+--     skips existing-row scan so a populated upgrade DB doesn't lock. Wrapped
+--     in a single DO-block + pg_constraint guard, idempotent across re-runs.
 --  2. VALIDATE CONSTRAINT           → walks existing rows under a weak lock.
--- Both steps are idempotent (DO-block + pg_constraint check) so re-running
--- the file on a fresh bootstrap is a no-op.
+--     Wrapped per-constraint in a DO-block with EXCEPTION WHEN check_violation
+--     so a single oversized legacy row emits a WARNING rather than aborting
+--     the entire migration. Each block is independently idempotent: VALIDATE
+--     on an already-validated constraint is a documented no-op, and a
+--     constraint left NOT VALID is retried on the next file run.
 --
 -- Out of scope (per issue #23): name_hmac (fixed length by construction),
 -- per-user row count quotas, write-rate limiting.
@@ -126,16 +132,54 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------
--- 2. VALIDATE CONSTRAINT
+-- 2. VALIDATE CONSTRAINT (per-constraint, exception-tolerant)
 --
--- VALIDATE on an already-validated constraint is a documented no-op in
--- PostgreSQL (pg_constraint.convalidated is checked first), so the bare
--- statements below are themselves idempotent — no DO-block guard needed.
+-- Each block walks existing rows under a weak lock. On a populated upgrade
+-- DB, if any pre-existing row violates a cap (e.g. a row written through a
+-- non-cap-enforcing path or by direct SQL), a bare VALIDATE would raise
+-- check_violation and abort the migration mid-way under ON_ERROR_STOP=1.
+-- We catch the exception per-constraint so the operator sees a WARNING,
+-- the file completes, and the constraint stays NOT VALID -- which still
+-- enforces the cap on NEW writes; only the existing-row scan is skipped.
+--
+-- VALIDATE on an already-validated constraint is a documented no-op
+-- (pg_constraint.convalidated is checked first), so each block is itself
+-- idempotent: re-running the file after data cleanup retries VALIDATE for
+-- any constraint still NOT VALID.
 -- ---------------------------------------------------------------------------
 
-ALTER TABLE api.tags             VALIDATE CONSTRAINT tags_name_enc_size_cap;
-ALTER TABLE api.bookmarks        VALIDATE CONSTRAINT bookmarks_title_enc_size_cap;
-ALTER TABLE api.bookmarks        VALIDATE CONSTRAINT bookmarks_url_enc_size_cap;
-ALTER TABLE api.bookmarks        VALIDATE CONSTRAINT bookmarks_thumbnail_url_enc_size_cap;
-ALTER TABLE api.thumbnail_images VALIDATE CONSTRAINT thumbnail_images_original_name_enc_size_cap;
-ALTER TABLE api.thumbnail_images VALIDATE CONSTRAINT thumbnail_images_data_enc_size_cap;
+DO $$ BEGIN
+  ALTER TABLE api.tags VALIDATE CONSTRAINT tags_name_enc_size_cap;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'tags_name_enc_size_cap left NOT VALID -- existing oversized name_enc row(s); clean up and re-run migration';
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE api.bookmarks VALIDATE CONSTRAINT bookmarks_title_enc_size_cap;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'bookmarks_title_enc_size_cap left NOT VALID -- existing oversized title_enc row(s); clean up and re-run migration';
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE api.bookmarks VALIDATE CONSTRAINT bookmarks_url_enc_size_cap;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'bookmarks_url_enc_size_cap left NOT VALID -- existing oversized url_enc row(s); clean up and re-run migration';
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE api.bookmarks VALIDATE CONSTRAINT bookmarks_thumbnail_url_enc_size_cap;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'bookmarks_thumbnail_url_enc_size_cap left NOT VALID -- existing oversized thumbnail_url_enc row(s); clean up and re-run migration';
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE api.thumbnail_images VALIDATE CONSTRAINT thumbnail_images_original_name_enc_size_cap;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'thumbnail_images_original_name_enc_size_cap left NOT VALID -- existing oversized original_name_enc row(s); clean up and re-run migration';
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE api.thumbnail_images VALIDATE CONSTRAINT thumbnail_images_data_enc_size_cap;
+EXCEPTION WHEN check_violation THEN
+  RAISE WARNING 'thumbnail_images_data_enc_size_cap left NOT VALID -- existing oversized data_enc row(s); clean up and re-run migration';
+END $$;
