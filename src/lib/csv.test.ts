@@ -114,6 +114,39 @@ describe('parseCsvText — valid rows', () => {
     expect(result.valid[0].title).toBe('Title');
     expect(result.valid[0].tags).toEqual(['tag1']);
   });
+
+  it('truncates titles longer than MAX_TITLE_LENGTH (500) to 500 characters', () => {
+    const longTitle = 'a'.repeat(600);
+    const csv = '"Title","URL"\n"' + longTitle + '","https://example.com"';
+    const result = parseCsvText(csv);
+    expect(result.valid).toHaveLength(1);
+    expect(result.valid[0].title).toHaveLength(500);
+  });
+
+  it('truncates URLs longer than MAX_URL_LENGTH (2000) to 2000 characters before validation', () => {
+    // Build a 2500-char URL — still a valid http URL after slice to 2000.
+    const longUrl = 'https://example.com/' + 'a'.repeat(2480);
+    expect(longUrl.length).toBe(2500);
+    const csv = '"Title","URL"\n"T","' + longUrl + '"';
+    const result = parseCsvText(csv);
+    expect(result.valid).toHaveLength(1);
+    // The .slice(0, 2000) truncates the URL before parseHttpUrl validates it,
+    // so the stored value is exactly 2000 chars and still parses as http.
+    expect(result.valid[0].url).toHaveLength(2000);
+  });
+
+  it('truncates Thumbnail URLs longer than MAX_URL_LENGTH (2000) to 2000 characters before validation', () => {
+    // Same shape as the URL truncation test — the thumbnail field uses the
+    // same MAX_URL_LENGTH cap and is sliced before parseHttpUrl. Locks the
+    // third slice site in csv.ts:192 (rawThumb) for full parity with importJson.
+    const longThumb = 'https://thumb.example.com/' + 'a'.repeat(2474);
+    expect(longThumb.length).toBe(2500);
+    const csv = '"Title","URL","Thumbnail URL"\n"T","https://example.com","' + longThumb + '"';
+    const result = parseCsvText(csv);
+    expect(result.valid).toHaveLength(1);
+    expect(result.valid[0].thumbnailUrl).not.toBeNull();
+    expect(result.valid[0].thumbnailUrl).toHaveLength(2000);
+  });
 });
 
 // ---------------------------------------------------------------------------

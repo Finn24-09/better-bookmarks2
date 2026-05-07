@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { parseHttpUrl } from './url';
+import { MAX_TITLE_LENGTH, MAX_URL_LENGTH } from './bookmarks';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_ROWS = 500;
@@ -166,8 +167,8 @@ export function parseCsvText(text: string): CsvParseResult {
   dataRows.forEach((cols, idx) => {
     const rowNumber = idx + 2; // 1-based, accounting for header
 
-    const title = stripFormulaPrefix(cols[titleIdx] ?? '');
-    const url = cols[urlIdx] ?? '';
+    const title = stripFormulaPrefix(cols[titleIdx] ?? '').slice(0, MAX_TITLE_LENGTH);
+    const url = (cols[urlIdx] ?? '').slice(0, MAX_URL_LENGTH);
 
     if (!title) {
       skipped.push({ rowNumber, reason: `Row ${rowNumber}: Title is empty` });
@@ -188,7 +189,7 @@ export function parseCsvText(text: string): CsvParseResult {
       .filter((t) => t.length > 0);
 
     // Thumbnail URL: silently drop if not http/https
-    const rawThumb = thumbIdx !== -1 ? (cols[thumbIdx] ?? '') : '';
+    const rawThumb = thumbIdx !== -1 ? (cols[thumbIdx] ?? '').slice(0, MAX_URL_LENGTH) : '';
     const thumbnailUrl = parseHttpUrl(rawThumb);
 
     valid.push({ title, url: validUrl, thumbnailUrl, tags });
