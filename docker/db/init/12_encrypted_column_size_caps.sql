@@ -18,16 +18,17 @@
 -- least 1.5x headroom. The math per text-field column: plaintext_bytes (UTF-8
 -- worst case = 4 B/char) + 12 B IV + 16 B GCM tag, then base64 (4 × ceil(N/3)).
 -- thumbnail_images.data_enc is binary, not character-bounded — its 4 MiB
--- ceiling is sized against the Nginx 2 MiB body cap (~2.1x headroom) so any
--- legitimately uploaded thumbnail validates and the DB-layer cap purely
--- backstops a hypothetical bypass of the network limit.
+-- ceiling is sized at exactly 2.0x the Nginx 2 MiB body cap (4 194 304 /
+-- 2 097 152) so any legitimately uploaded thumbnail validates and the
+-- DB-layer cap purely backstops a hypothetical bypass of the network
+-- limit.
 --
 --   tags.name_enc                       4 KiB  | 100-char MAX_TAG_LENGTH
 --   bookmarks.title_enc                 8 KiB  | 500-char MAX_TITLE_LENGTH (importJson)
 --   bookmarks.url_enc                  16 KiB  | 2000-char MAX_URL_LENGTH (importJson)
 --   bookmarks.thumbnail_url_enc        16 KiB  | same shape as url_enc
 --   thumbnail_images.original_name_enc  4 KiB  | 255-char filename slice
---   thumbnail_images.data_enc           4 MiB  | ~2.1x above Nginx client_max_body_size 2M
+--   thumbnail_images.data_enc           4 MiB  | 2.0x above Nginx client_max_body_size 2M
 --
 -- Migration shape:
 --  1. ADD CONSTRAINT ... NOT VALID  → enforced on new writes immediately,
@@ -55,7 +56,10 @@
 -- Each constraint sits in its own DO-block guarded by a pg_constraint lookup,
 -- so a transient failure on one (e.g. lock timeout, disk pressure) does not
 -- roll back constraints that already succeeded earlier in the file. Re-running
--- the file picks up where the previous run left off.
+-- the file picks up where the previous run left off. lock_not_available is
+-- intentionally NOT caught: it propagates so an operator running the file
+-- under explicit lock_timeout sees the contention and retries -- section 2's
+-- VALIDATE blocks then handle the absent constraint via undefined_object.
 -- ---------------------------------------------------------------------------
 
 DO $$
