@@ -259,9 +259,7 @@ export function BookmarkFormModal({
                   type="text"
                   placeholder="Enter bookmark title…"
                   className={errors.title ? errorInputCls : inputCls}
-                  // +1 lets the user type one char past the cap so the inline error appears
-                  // visibly, instead of the input silently swallowing keystrokes at the
-                  // boundary (mirrors the ManageTagsModal rename input pattern).
+                  // +1 lets the user type one char past the cap so the inline error fires (mirrors ManageTagsModal).
                   maxLength={MAX_TITLE_LENGTH + 1}
                   {...register("title", {
                     required: "Title is required",

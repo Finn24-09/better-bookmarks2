@@ -22,11 +22,7 @@ vi.mock('../../lib/tags', () => ({
   MAX_TAG_LENGTH: 100,
 }));
 
-// Partial mock via vi.importActual so real exports (MAX_TITLE_LENGTH /
-// MAX_URL_LENGTH) survive. ImportBookmarksModal imports from importJson.ts
-// (line 12 of the source), which itself imports those two constants from
-// bookmarks.ts; a flat-object replacement makes them undefined at module
-// load time and the dependent slice() calls in importJson.ts misbehave.
+// Partial mock (vi.importActual) keeps MAX_*_LENGTH exports intact; flat mock would set them undefined, breaking the slice(0, MAX_…) calls in importJson.ts (which this component imports transitively).
 vi.mock('../../lib/bookmarks', async () => {
   const actual = await vi.importActual<typeof import('../../lib/bookmarks')>('../../lib/bookmarks');
   return {
