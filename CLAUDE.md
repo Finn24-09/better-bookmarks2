@@ -88,7 +88,7 @@ When creating new features or modifying existing ones, hold the line on these. T
 - All routes that take user input validate with **zod schemas** — no `any` types crossing the trust boundary
 - Use parameterized queries via `pg`'s `$1, $2` placeholders — never string-concatenate SQL
 - Apply per-route rate limits in `services/email/src/rateLimit.ts`; treat Nginx limits as defence-in-depth, not the only line
-- Pin GitHub Actions to commit SHAs — tags are mutable (see `.github/workflows/ci.yml`)
+- GitHub Actions in `.github/workflows/` use moving major-version tags (`@v6`, `@v1`, etc.) — accept the trade-off of receiving upstream regressions immediately in exchange for not having to bump SHAs manually
 - Default-deny `permissions:` on workflows; elevate per-job only when needed
 - Pino logger redacts via `LOG_REDACT_PATHS` and the custom `reqSerializer` — keep both in sync; query strings can leak tokens through `req.url`
 - Fastify error handler returns generic messages on 5xx; never leak internal error details
