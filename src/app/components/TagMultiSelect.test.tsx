@@ -176,6 +176,10 @@ describe('TagMultiSelect', () => {
     // bypasses the HTML attribute (the test's job is to verify the JS
     // length guard, not the HTML clamp).
     const input = screen.getByPlaceholderText('Search tags…') as HTMLInputElement;
+    // Confirm the HTML maxLength attribute actually reaches the underlying input
+    // (cmdk's CommandInput is a wrapper; this guards against a future change to
+    // its prop forwarding silently turning the HTML clamp into dead code).
+    expect(input).toHaveAttribute('maxlength', String(MAX_TAG_LENGTH + 1));
     fireEvent.change(input, { target: { value: 'a'.repeat(MAX_TAG_LENGTH + 1) } });
 
     expect(screen.getByText(/100 characters or fewer/i)).toBeInTheDocument();

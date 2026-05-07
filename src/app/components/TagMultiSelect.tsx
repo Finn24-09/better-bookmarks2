@@ -53,7 +53,7 @@ export function TagMultiSelect({
     if (!onCreateTag || !trimmed || trimmed.length > MAX_TAG_LENGTH) return;
     setCreating(true);
     try {
-      const newTag = await onCreateTag(search.trim());
+      const newTag = await onCreateTag(trimmed);
       onChange([...selected, newTag.id]);
       setSearch("");
     } finally {
