@@ -383,6 +383,8 @@ describe('tags', () => {
     expect(caught.message).toBe('Request failed (400)');
     expect(caught.message).not.toContain('tags_name_enc_size_cap');
     expect(caught.message).not.toContain('relation "tags"');
+    expect(caught.message).not.toContain('check constraint');
+    expect(caught.message).not.toContain('Failing row');
   });
 
   // -------------------------------------------------------------------------

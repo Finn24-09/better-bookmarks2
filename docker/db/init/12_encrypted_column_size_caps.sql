@@ -29,13 +29,6 @@
 --   thumbnail_images.original_name_enc  4 KiB  | 255-char filename slice
 --   thumbnail_images.data_enc           4 MiB  | ~2.1x above Nginx client_max_body_size 2M
 --
--- The interactive bookmark form length-caps title and URL client-side via
--- react-hook-form maxLength validators (BookmarkFormModal.tsx); the DB caps
--- below are the authoritative gate for any client that bypasses the form.
--- data_enc's 4 MiB cap sits above the Nginx 2 MiB body limit so no
--- currently-storeable row fails validation, while still bounding the
--- DB-layer DoS surface for any future operator who bypasses Nginx.
---
 -- Migration shape:
 --  1. ADD CONSTRAINT ... NOT VALID  → enforced on new writes immediately,
 --     skips existing-row scan so a populated upgrade DB doesn't lock. Each
@@ -43,11 +36,14 @@
 --     transient failure on one (e.g. lock timeout) doesn't roll back the
 --     others; idempotent across re-runs.
 --  2. VALIDATE CONSTRAINT           → walks existing rows under a weak lock.
---     Wrapped per-constraint in a DO-block with EXCEPTION WHEN check_violation
---     so a single oversized legacy row emits a WARNING rather than aborting
---     the entire migration. Each block is independently idempotent: VALIDATE
---     on an already-validated constraint is a documented no-op, and a
---     constraint left NOT VALID is retried on the next file run.
+--     Wrapped per-constraint in a DO-block catching two PL/pgSQL exception
+--     classes: check_violation (any oversized legacy row(s) emit a WARNING
+--     rather than aborting) and undefined_object (the constraint is absent
+--     because section 1's ADD did not complete or was manually dropped --
+--     also a WARNING; the operator re-runs to retry the ADD). Each block
+--     is independently idempotent: VALIDATE on an already-validated
+--     constraint is a documented no-op, and a constraint left NOT VALID
+--     is retried on the next file run.
 --
 -- Out of scope (per issue #23): name_hmac (fixed length by construction),
 -- per-user row count quotas, write-rate limiting.
