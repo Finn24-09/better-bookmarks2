@@ -13,10 +13,14 @@
 -- at the database layer — the authoritative gate for any client that
 -- ignores or bypasses the frontend validators.
 --
--- Each ceiling is sized to the worst-case AES-GCM ciphertext for the
--- corresponding plaintext cap, expanded by base64 (≈1.34x), with at least
--- 1.5x extra headroom. The math per column: plaintext_bytes (UTF-8 worst case
--- = 4 B/char) + 12 B IV + 16 B GCM tag, then base64 (4 × ceil(N/3)).
+-- Five of the six ceilings are sized to the worst-case AES-GCM ciphertext
+-- for the corresponding plaintext cap, expanded by base64 (≈1.34x), with at
+-- least 1.5x headroom. The math per text-field column: plaintext_bytes (UTF-8
+-- worst case = 4 B/char) + 12 B IV + 16 B GCM tag, then base64 (4 × ceil(N/3)).
+-- thumbnail_images.data_enc is binary, not character-bounded — its 4 MiB
+-- ceiling is sized against the Nginx 2 MiB body cap (~2.1x headroom) so any
+-- legitimately uploaded thumbnail validates and the DB-layer cap purely
+-- backstops a hypothetical bypass of the network limit.
 --
 --   tags.name_enc                       4 KiB  | 100-char MAX_TAG_LENGTH
 --   bookmarks.title_enc                 8 KiB  | 500-char MAX_TITLE_LENGTH (importJson)
@@ -34,8 +38,10 @@
 --
 -- Migration shape:
 --  1. ADD CONSTRAINT ... NOT VALID  → enforced on new writes immediately,
---     skips existing-row scan so a populated upgrade DB doesn't lock. Wrapped
---     in a single DO-block + pg_constraint guard, idempotent across re-runs.
+--     skips existing-row scan so a populated upgrade DB doesn't lock. Each
+--     constraint wrapped in its own DO-block + pg_constraint guard so a
+--     transient failure on one (e.g. lock timeout) doesn't roll back the
+--     others; idempotent across re-runs.
 --  2. VALIDATE CONSTRAINT           → walks existing rows under a weak lock.
 --     Wrapped per-constraint in a DO-block with EXCEPTION WHEN check_violation
 --     so a single oversized legacy row emits a WARNING rather than aborting
@@ -48,7 +54,12 @@
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
--- 1. ADD CONSTRAINT ... NOT VALID
+-- 1. ADD CONSTRAINT ... NOT VALID (per-constraint, idempotent)
+--
+-- Each constraint sits in its own DO-block guarded by a pg_constraint lookup,
+-- so a transient failure on one (e.g. lock timeout, disk pressure) does not
+-- roll back constraints that already succeeded earlier in the file. Re-running
+-- the file picks up where the previous run left off.
 -- ---------------------------------------------------------------------------
 
 DO $$
@@ -64,7 +75,10 @@ BEGIN
       ADD CONSTRAINT tags_name_enc_size_cap
       CHECK (octet_length(name_enc) <= 4096) NOT VALID;
   END IF;
+END $$;
 
+DO $$
+BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint c
     JOIN pg_class t ON t.oid = c.conrelid
@@ -76,7 +90,10 @@ BEGIN
       ADD CONSTRAINT bookmarks_title_enc_size_cap
       CHECK (octet_length(title_enc) <= 8192) NOT VALID;
   END IF;
+END $$;
 
+DO $$
+BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint c
     JOIN pg_class t ON t.oid = c.conrelid
@@ -88,7 +105,10 @@ BEGIN
       ADD CONSTRAINT bookmarks_url_enc_size_cap
       CHECK (octet_length(url_enc) <= 16384) NOT VALID;
   END IF;
+END $$;
 
+DO $$
+BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint c
     JOIN pg_class t ON t.oid = c.conrelid
@@ -104,7 +124,10 @@ BEGIN
       ADD CONSTRAINT bookmarks_thumbnail_url_enc_size_cap
       CHECK (octet_length(thumbnail_url_enc) <= 16384) NOT VALID;
   END IF;
+END $$;
 
+DO $$
+BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint c
     JOIN pg_class t ON t.oid = c.conrelid
@@ -116,7 +139,10 @@ BEGIN
       ADD CONSTRAINT thumbnail_images_original_name_enc_size_cap
       CHECK (octet_length(original_name_enc) <= 4096) NOT VALID;
   END IF;
+END $$;
 
+DO $$
+BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint c
     JOIN pg_class t ON t.oid = c.conrelid
@@ -128,8 +154,7 @@ BEGIN
       ADD CONSTRAINT thumbnail_images_data_enc_size_cap
       CHECK (octet_length(data_enc) <= 4194304) NOT VALID;
   END IF;
-END
-$$;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- 2. VALIDATE CONSTRAINT (per-constraint, exception-tolerant)
@@ -142,6 +167,11 @@ $$;
 -- the file completes, and the constraint stays NOT VALID -- which still
 -- enforces the cap on NEW writes; only the existing-row scan is skipped.
 --
+-- Each block also catches undefined_object so a partially-applied prior run
+-- (where ADD CONSTRAINT failed for that constraint, leaving it absent when
+-- VALIDATE attempts to run) emits a WARNING instead of aborting; the
+-- operator can re-run the file to retry the ADD step.
+--
 -- VALIDATE on an already-validated constraint is a documented no-op
 -- (pg_constraint.convalidated is checked first), so each block is itself
 -- idempotent: re-running the file after data cleanup retries VALIDATE for
@@ -150,36 +180,54 @@ $$;
 
 DO $$ BEGIN
   ALTER TABLE api.tags VALIDATE CONSTRAINT tags_name_enc_size_cap;
-EXCEPTION WHEN check_violation THEN
-  RAISE WARNING 'tags_name_enc_size_cap left NOT VALID -- existing oversized name_enc row(s); clean up and re-run migration';
+EXCEPTION
+  WHEN check_violation THEN
+    RAISE WARNING 'tags_name_enc_size_cap left NOT VALID -- existing oversized name_enc row(s); clean up and re-run migration';
+  WHEN undefined_object THEN
+    RAISE WARNING 'tags_name_enc_size_cap not found at VALIDATE time -- ADD CONSTRAINT did not complete or constraint was dropped; re-run migration to retry';
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE api.bookmarks VALIDATE CONSTRAINT bookmarks_title_enc_size_cap;
-EXCEPTION WHEN check_violation THEN
-  RAISE WARNING 'bookmarks_title_enc_size_cap left NOT VALID -- existing oversized title_enc row(s); clean up and re-run migration';
+EXCEPTION
+  WHEN check_violation THEN
+    RAISE WARNING 'bookmarks_title_enc_size_cap left NOT VALID -- existing oversized title_enc row(s); clean up and re-run migration';
+  WHEN undefined_object THEN
+    RAISE WARNING 'bookmarks_title_enc_size_cap not found at VALIDATE time -- ADD CONSTRAINT did not complete or constraint was dropped; re-run migration to retry';
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE api.bookmarks VALIDATE CONSTRAINT bookmarks_url_enc_size_cap;
-EXCEPTION WHEN check_violation THEN
-  RAISE WARNING 'bookmarks_url_enc_size_cap left NOT VALID -- existing oversized url_enc row(s); clean up and re-run migration';
+EXCEPTION
+  WHEN check_violation THEN
+    RAISE WARNING 'bookmarks_url_enc_size_cap left NOT VALID -- existing oversized url_enc row(s); clean up and re-run migration';
+  WHEN undefined_object THEN
+    RAISE WARNING 'bookmarks_url_enc_size_cap not found at VALIDATE time -- ADD CONSTRAINT did not complete or constraint was dropped; re-run migration to retry';
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE api.bookmarks VALIDATE CONSTRAINT bookmarks_thumbnail_url_enc_size_cap;
-EXCEPTION WHEN check_violation THEN
-  RAISE WARNING 'bookmarks_thumbnail_url_enc_size_cap left NOT VALID -- existing oversized thumbnail_url_enc row(s); clean up and re-run migration';
+EXCEPTION
+  WHEN check_violation THEN
+    RAISE WARNING 'bookmarks_thumbnail_url_enc_size_cap left NOT VALID -- existing oversized thumbnail_url_enc row(s); clean up and re-run migration';
+  WHEN undefined_object THEN
+    RAISE WARNING 'bookmarks_thumbnail_url_enc_size_cap not found at VALIDATE time -- ADD CONSTRAINT did not complete or constraint was dropped; re-run migration to retry';
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE api.thumbnail_images VALIDATE CONSTRAINT thumbnail_images_original_name_enc_size_cap;
-EXCEPTION WHEN check_violation THEN
-  RAISE WARNING 'thumbnail_images_original_name_enc_size_cap left NOT VALID -- existing oversized original_name_enc row(s); clean up and re-run migration';
+EXCEPTION
+  WHEN check_violation THEN
+    RAISE WARNING 'thumbnail_images_original_name_enc_size_cap left NOT VALID -- existing oversized original_name_enc row(s); clean up and re-run migration';
+  WHEN undefined_object THEN
+    RAISE WARNING 'thumbnail_images_original_name_enc_size_cap not found at VALIDATE time -- ADD CONSTRAINT did not complete or constraint was dropped; re-run migration to retry';
 END $$;
 
 DO $$ BEGIN
   ALTER TABLE api.thumbnail_images VALIDATE CONSTRAINT thumbnail_images_data_enc_size_cap;
-EXCEPTION WHEN check_violation THEN
-  RAISE WARNING 'thumbnail_images_data_enc_size_cap left NOT VALID -- existing oversized data_enc row(s); clean up and re-run migration';
+EXCEPTION
+  WHEN check_violation THEN
+    RAISE WARNING 'thumbnail_images_data_enc_size_cap left NOT VALID -- existing oversized data_enc row(s); clean up and re-run migration';
+  WHEN undefined_object THEN
+    RAISE WARNING 'thumbnail_images_data_enc_size_cap not found at VALIDATE time -- ADD CONSTRAINT did not complete or constraint was dropped; re-run migration to retry';
 END $$;
