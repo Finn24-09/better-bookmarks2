@@ -31,7 +31,13 @@ jobs:
       github.event.comment.author_association == 'OWNER' &&
       contains(github.event.comment.body, '@claude review')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
+    # A new @claude review on the same PR cancels any in-progress run. This
+    # prevents a hung SDK invocation from blocking the runner until the full
+    # timeout expires; the user just re-triggers and the stuck run dies.
+    concurrency:
+      group: claude-review-pr-${{ github.event.issue.number }}
+      cancel-in-progress: true
     permissions:
       contents: read
       pull-requests: write
@@ -51,6 +57,9 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
+          # Show the SDK's full output so future hangs leave actionable
+          # logs instead of going silent between init and the timeout.
+          show_full_output: true
           claude_args: |
             --max-turns 30
             --allowedTools "Read,Glob,Grep,LS,Bash(gh:*),Bash(git:*)"
@@ -58,8 +67,18 @@ jobs:
             Review pull request #${{ github.event.issue.number }} in ${{ github.repository }}.
             Focus on correctness, security, maintainability, and test coverage.
 
-            Use `gh pr view ${{ github.event.issue.number }}` and
-            `gh pr diff ${{ github.event.issue.number }}` to read the PR.
+            Read ONLY the current code change -- not the PR conversation.
+            Use:
+              - `gh pr view ${{ github.event.issue.number }} --json title,body,files`
+                (do NOT pass --comments; do NOT read existing review threads)
+              - `gh pr diff ${{ github.event.issue.number }}`
+
+            If previous Claude review comments already exist on this PR,
+            IGNORE them. Do not read them, do not respond to them, do not
+            try to differentiate from them. Each invocation must produce an
+            independent review of the current diff, not a delta against
+            prior bot comments. Reading accumulated review history burns
+            turns and has caused timeouts on comment-heavy PRs.
 
             Post exactly one summary comment on the PR via
             `gh pr comment ${{ github.event.issue.number }} --body "<MARKDOWN>"`.
@@ -78,7 +97,13 @@ jobs:
       github.event.comment.author_association == 'OWNER' &&
       contains(github.event.comment.body, '@claude pr')
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 16
+    # A new @claude pr on the same issue cancels any in-progress run, so a
+    # stuck invocation can be cleared by re-triggering instead of waiting
+    # out the full timeout.
+    concurrency:
+      group: claude-issue-pr-${{ github.event.issue.number }}
+      cancel-in-progress: true
     permissions:
       contents: read
       pull-requests: write
@@ -105,6 +130,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Show full SDK output so a hung invocation leaves diagnostic
+          # logs rather than going silent until the timeout fires.
+          show_full_output: true
           claude_args: |
             --max-turns 25
             --allowedTools "Read,Glob,Grep,LS,Bash(gh:*),Bash(git:*)"
