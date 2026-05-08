@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event';
 import { ApiError } from '../../lib/api';
 import { ManageTagsModal } from './ManageTagsModal';
 import type { Tag } from '../../lib/tags';
-import type { Bookmark } from '../../lib/bookmarks';
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -24,6 +23,7 @@ vi.mock('../../lib/tags', async (importOriginal) => {
     ...mod,
     updateTag: vi.fn(),
     deleteTag: vi.fn(),
+    getBookmarkTagCounts: vi.fn(),
   };
 });
 
@@ -31,7 +31,7 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-import { updateTag, deleteTag } from '../../lib/tags';
+import { updateTag, deleteTag, getBookmarkTagCounts } from '../../lib/tags';
 import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
@@ -42,20 +42,9 @@ function makeTag(overrides: Partial<Tag> = {}): Tag {
   return { id: 'tag-1', name: 'Personal', keyVersion: 1, ...overrides };
 }
 
-function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
-  return {
-    id: 'bm-1', title: 'T', url: 'https://a.com',
-    thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null,
-    tagIds: [], createdAt: '', updatedAt: '',
-    keyVersion: 1, thumbnailKeyVersion: null,
-    ...overrides,
-  };
-}
-
 interface RenderProps {
   open?: boolean;
   tags?: Tag[];
-  bookmarks?: Bookmark[];
   onClose?: () => void;
   onSave?: () => void;
   onTagDeleted?: (id: string) => void;
@@ -73,7 +62,6 @@ function renderModal(props: RenderProps = {}) {
       <ManageTagsModal
         open={props.open ?? true}
         tags={props.tags ?? [makeTag()]}
-        bookmarks={props.bookmarks ?? []}
         onClose={onClose}
         onSave={onSave}
         onTagDeleted={onTagDeleted}
@@ -87,6 +75,7 @@ describe('ManageTagsModal', () => {
     vi.clearAllMocks();
     vi.mocked(updateTag).mockResolvedValue(undefined);
     vi.mocked(deleteTag).mockResolvedValue(undefined);
+    vi.mocked(getBookmarkTagCounts).mockResolvedValue(new Map());
   });
 
   // -------------------------------------------------------------------------
@@ -295,15 +284,13 @@ describe('ManageTagsModal', () => {
   // -------------------------------------------------------------------------
   // Delete — confirm flow
   // -------------------------------------------------------------------------
-  it('clicking trash shows the confirm prompt with the approximate bookmark count', async () => {
+  it('clicking trash shows the confirm prompt with the count from getBookmarkTagCounts', async () => {
     const user = userEvent.setup();
-    const tag = makeTag({ id: 'tag-x', name: 'Personal' });
-    const bookmarks = [
-      makeBookmark({ id: 'b1', tagIds: ['tag-x'] }),
-      makeBookmark({ id: 'b2', tagIds: ['tag-x'] }),
-      makeBookmark({ id: 'b3', tagIds: ['other'] }),
-    ];
-    renderModal({ tags: [tag], bookmarks });
+    vi.mocked(getBookmarkTagCounts).mockResolvedValue(new Map([['tag-x', 2]]));
+    renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Used in 2 bookmarks')).toBeInTheDocument(),
+    );
     await user.click(screen.getByLabelText('Delete Personal'));
     expect(screen.getByText(/Removed from 2 bookmarks \(approx\.\)/i)).toBeInTheDocument();
   });
@@ -392,7 +379,6 @@ describe('ManageTagsModal', () => {
       <ManageTagsModal
         open={true}
         tags={[makeTag({ id: 't1', name: 'New' })]}
-        bookmarks={[]}
         onClose={vi.fn()}
         onSave={vi.fn()}
         onTagDeleted={vi.fn()}
@@ -405,86 +391,93 @@ describe('ManageTagsModal', () => {
   // -------------------------------------------------------------------------
   // Per-tag usage pill (idle rows only)
   // -------------------------------------------------------------------------
-  it('renders a usage-count pill on each idle row reflecting how many bookmarks reference each tag', () => {
+  it('renders usage-count pills using getBookmarkTagCounts (not paginated bookmarks prop)', async () => {
+    vi.mocked(getBookmarkTagCounts).mockResolvedValue(
+      new Map([
+        ['t-used2', 2],
+        ['t-used1', 1],
+      ]),
+    );
     const tags = [
       makeTag({ id: 't-used2', name: 'UsedTwice' }),
       makeTag({ id: 't-used1', name: 'UsedOnce' }),
       makeTag({ id: 't-unused', name: 'UnusedTag' }),
     ];
-    const bookmarks = [
-      makeBookmark({ id: 'b1', tagIds: ['t-used2', 't-used1'] }),
-      makeBookmark({ id: 'b2', tagIds: ['t-used2'] }),
-    ];
-    renderModal({ tags, bookmarks });
+    renderModal({ tags });
 
-    expect(screen.getByLabelText('Used in 2 bookmarks')).toHaveTextContent('2');
+    await waitFor(() =>
+      expect(screen.getByLabelText('Used in 2 bookmarks')).toHaveTextContent('2'),
+    );
     expect(screen.getByLabelText('Used in 1 bookmark')).toHaveTextContent('1');
     expect(screen.getByLabelText('Used in 0 bookmarks')).toHaveTextContent('0');
   });
 
   it('does NOT render the usage pill while a row is in edit state', async () => {
     const user = userEvent.setup();
-    const tag = makeTag({ id: 'tag-x', name: 'Personal' });
-    const bookmarks = [
-      makeBookmark({ id: 'b1', tagIds: ['tag-x'] }),
-      makeBookmark({ id: 'b2', tagIds: ['tag-x'] }),
-    ];
-    renderModal({ tags: [tag], bookmarks });
+    vi.mocked(getBookmarkTagCounts).mockResolvedValue(new Map([['tag-x', 2]]));
+    renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
 
-    expect(screen.getByLabelText('Used in 2 bookmarks')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByLabelText('Used in 2 bookmarks')).toBeInTheDocument(),
+    );
     await user.click(screen.getByLabelText('Rename Personal'));
     expect(screen.queryByLabelText('Used in 2 bookmarks')).not.toBeInTheDocument();
   });
 
   it('does NOT render the usage pill while a row is in confirm-delete state', async () => {
     const user = userEvent.setup();
-    const tag = makeTag({ id: 'tag-x', name: 'Personal' });
-    const bookmarks = [makeBookmark({ id: 'b1', tagIds: ['tag-x'] })];
-    renderModal({ tags: [tag], bookmarks });
+    vi.mocked(getBookmarkTagCounts).mockResolvedValue(new Map([['tag-x', 1]]));
+    renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
 
-    expect(screen.getByLabelText('Used in 1 bookmark')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByLabelText('Used in 1 bookmark')).toBeInTheDocument(),
+    );
     await user.click(screen.getByLabelText('Delete Personal'));
     expect(screen.queryByLabelText('Used in 1 bookmark')).not.toBeInTheDocument();
   });
 
-  it('aria-label uses singular "bookmark" only for 1, plural "bookmarks" for 0/2/many', () => {
+  it('aria-label uses singular "bookmark" only for 1, plural "bookmarks" for 0/2/many', async () => {
+    vi.mocked(getBookmarkTagCounts).mockResolvedValue(
+      new Map([
+        ['t1', 1],
+        ['t2', 2],
+        ['t5', 5],
+      ]),
+    );
     const tags = [
       makeTag({ id: 't0', name: 'Zero' }),
       makeTag({ id: 't1', name: 'One' }),
       makeTag({ id: 't2', name: 'Two' }),
       makeTag({ id: 't5', name: 'Five' }),
     ];
-    const bookmarks = [
-      makeBookmark({ id: 'b1', tagIds: ['t1', 't2', 't5'] }),
-      makeBookmark({ id: 'b2', tagIds: ['t2', 't5'] }),
-      makeBookmark({ id: 'b3', tagIds: ['t5'] }),
-      makeBookmark({ id: 'b4', tagIds: ['t5'] }),
-      makeBookmark({ id: 'b5', tagIds: ['t5'] }),
-    ];
-    renderModal({ tags, bookmarks });
+    renderModal({ tags });
 
+    await waitFor(() =>
+      expect(screen.getByLabelText('Used in 5 bookmarks')).toBeInTheDocument(),
+    );
     expect(screen.getByLabelText('Used in 0 bookmarks')).toBeInTheDocument();
     expect(screen.getByLabelText('Used in 1 bookmark')).toBeInTheDocument();
     expect(screen.getByLabelText('Used in 2 bookmarks')).toBeInTheDocument();
-    expect(screen.getByLabelText('Used in 5 bookmarks')).toBeInTheDocument();
   });
 
   it('usage pill counts are correct on rows surviving a search filter', async () => {
     const user = userEvent.setup();
+    vi.mocked(getBookmarkTagCounts).mockResolvedValue(
+      new Map([
+        ['t3', 2],
+        ['t7', 3],
+      ]),
+    );
     const tags = Array.from({ length: 11 }, (_, i) => makeTag({ id: `t${i}`, name: `Tag${i}` }));
-    const bookmarks = [
-      makeBookmark({ id: 'b1', tagIds: ['t3'] }),
-      makeBookmark({ id: 'b2', tagIds: ['t3', 't7'] }),
-      makeBookmark({ id: 'b3', tagIds: ['t7'] }),
-      makeBookmark({ id: 'b4', tagIds: ['t7'] }),
-    ];
-    renderModal({ tags, bookmarks });
+    renderModal({ tags });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Used in 2 bookmarks')).toBeInTheDocument(),
+    );
 
     const searchInput = screen.getByPlaceholderText(/search tags/i);
     await user.type(searchInput, 'Tag3');
 
-    // Filtered row keeps the count derived from the full bookmarks set,
-    // not from the filtered tag list.
     expect(screen.getByLabelText('Used in 2 bookmarks')).toBeInTheDocument();
     expect(screen.queryByLabelText('Used in 3 bookmarks')).not.toBeInTheDocument();
   });
@@ -509,6 +502,95 @@ describe('ManageTagsModal', () => {
     expect(receivedSignal!.aborted).toBe(false);
 
     act(() => unmount());
+
+    expect(receivedSignal!.aborted).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Counts data flow (issue #29)
+  // -------------------------------------------------------------------------
+  it('calls getBookmarkTagCounts exactly once when the modal opens', async () => {
+    renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
+    await waitFor(() => expect(getBookmarkTagCounts).toHaveBeenCalledTimes(1));
+  });
+
+  it('does NOT call getBookmarkTagCounts when the modal is rendered with open=false', async () => {
+    renderModal({ open: false, tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getBookmarkTagCounts).not.toHaveBeenCalled();
+  });
+
+  it('falls back to 0 in the pill when getBookmarkTagCounts rejects (modal stays usable)', async () => {
+    vi.mocked(getBookmarkTagCounts).mockRejectedValue(new Error('boom'));
+    renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Used in 0 bookmarks')).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText('Rename Personal')).toBeInTheDocument();
+    expect(screen.getByLabelText('Delete Personal')).toBeInTheDocument();
+  });
+
+  it('re-fetches counts when the modal is closed and re-opened', async () => {
+    const { rerender } = render(
+      <ManageTagsModal
+        open={true}
+        tags={[makeTag({ id: 'tag-x', name: 'Personal' })]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onTagDeleted={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(getBookmarkTagCounts).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <ManageTagsModal
+        open={false}
+        tags={[makeTag({ id: 'tag-x', name: 'Personal' })]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onTagDeleted={vi.fn()}
+      />,
+    );
+    rerender(
+      <ManageTagsModal
+        open={true}
+        tags={[makeTag({ id: 'tag-x', name: 'Personal' })]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onTagDeleted={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(getBookmarkTagCounts).toHaveBeenCalledTimes(2));
+  });
+
+  it('aborts an in-flight count fetch when the modal closes', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    vi.mocked(getBookmarkTagCounts).mockImplementation(async (options) => {
+      receivedSignal = options?.signal;
+      return new Promise<Map<string, number>>(() => {});
+    });
+
+    const { rerender } = render(
+      <ManageTagsModal
+        open={true}
+        tags={[makeTag({ id: 'tag-x', name: 'Personal' })]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onTagDeleted={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(receivedSignal).toBeDefined());
+    expect(receivedSignal!.aborted).toBe(false);
+
+    rerender(
+      <ManageTagsModal
+        open={false}
+        tags={[makeTag({ id: 'tag-x', name: 'Personal' })]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onTagDeleted={vi.fn()}
+      />,
+    );
 
     expect(receivedSignal!.aborted).toBe(true);
   });

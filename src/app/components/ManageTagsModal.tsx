@@ -10,15 +10,12 @@ import {
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./ui/utils";
 import { ApiError } from "../../lib/api";
-import { updateTag, deleteTag, MAX_TAG_LENGTH, type Tag } from "../../lib/tags";
-import type { Bookmark } from "../../lib/bookmarks";
+import { updateTag, deleteTag, getBookmarkTagCounts, MAX_TAG_LENGTH, type Tag } from "../../lib/tags";
 import { useAuth } from "../contexts/AuthContext";
 
 interface ManageTagsModalProps {
   open: boolean;
   tags: Tag[];
-  /** Used to compute the approximate bookmark count shown in the delete confirm. */
-  bookmarks: Bookmark[];
   onClose: () => void;
   /** Called after a successful rename or delete so the parent can re-fetch. */
   onSave: () => void;
@@ -45,7 +42,6 @@ const DUPLICATE_TAG_MESSAGE = "A tag with that name already exists.";
 export function ManageTagsModal({
   open,
   tags,
-  bookmarks,
   onClose,
   onSave,
   onTagDeleted,
@@ -85,19 +81,31 @@ export function ManageTagsModal({
     return tags.filter((t) => t.name.toLowerCase().includes(q));
   }, [tags, search, showSearch]);
 
-  // Tag-id -> bookmark-count, computed once per bookmarks/tags change so each
-  // row reads its count in O(1) instead of scanning bookmarks per render.
-  const usageByTagId = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const tag of tags) map.set(tag.id, 0);
-    for (const bm of bookmarks) {
-      for (const id of bm.tagIds) {
-        const prev = map.get(id);
-        if (prev !== undefined) map.set(id, prev + 1);
+  // Per-tag bookmark counts fetched from the server on every open=true
+  // transition. Sourcing this from /bookmark_tags (RLS-restricted to the
+  // caller) means the count reflects ALL of the user's bookmarks, not just
+  // whatever the parent's paginated useBookmarks state happens to hold.
+  // Issue #29.
+  const [usageByTagId, setUsageByTagId] = useState<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const counts = await getBookmarkTagCounts({ signal: controller.signal });
+        setUsageByTagId(counts);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        // Silent fallback: leave the map empty so pills render 0 and the
+        // user can still rename/delete. A toast here would be noisy for a
+        // count that is inherently approximate ("(approx.)" in the
+        // confirm row already signals best-effort).
+        setUsageByTagId(new Map());
       }
-    }
-    return map;
-  }, [tags, bookmarks]);
+    })();
+    return () => controller.abort();
+  }, [open]);
 
   const enterEdit = (tag: Tag) => {
     // Seed with the trimmed name so a legacy record whose decrypted name has
