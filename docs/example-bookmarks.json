@@ -1,0 +1,263 @@
+{
+  "version": 1,
+  "exportedAt": "2026-05-08T12:00:00.000Z",
+  "totalBookmarks": 32,
+  "bookmarks": [
+    {
+      "title": "GitHub",
+      "url": "https://github.com",
+      "tags": ["dev", "open-source", "tools"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=github.com&sz=128" },
+      "createdAt": "2026-04-01T08:00:00.000Z",
+      "updatedAt": "2026-04-01T08:00:00.000Z"
+    },
+    {
+      "title": "Stack Overflow",
+      "url": "https://stackoverflow.com",
+      "tags": ["dev", "reference"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=stackoverflow.com&sz=128" },
+      "createdAt": "2026-04-02T08:00:00.000Z",
+      "updatedAt": "2026-04-02T08:00:00.000Z"
+    },
+    {
+      "title": "MDN Web Docs",
+      "url": "https://developer.mozilla.org",
+      "tags": ["dev", "reference", "learning"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=developer.mozilla.org&sz=128" },
+      "createdAt": "2026-04-03T08:00:00.000Z",
+      "updatedAt": "2026-04-03T08:00:00.000Z"
+    },
+    {
+      "title": "TypeScript Handbook",
+      "url": "https://www.typescriptlang.org/docs/handbook/intro.html",
+      "tags": ["dev", "learning", "reference"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=typescriptlang.org&sz=128" },
+      "createdAt": "2026-04-04T08:00:00.000Z",
+      "updatedAt": "2026-04-04T08:00:00.000Z"
+    },
+    {
+      "title": "React Documentation",
+      "url": "https://react.dev",
+      "tags": ["dev", "learning", "reference"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=react.dev&sz=128" },
+      "createdAt": "2026-04-05T08:00:00.000Z",
+      "updatedAt": "2026-04-05T08:00:00.000Z"
+    },
+    {
+      "title": "Tailwind CSS",
+      "url": "https://tailwindcss.com",
+      "tags": ["dev", "design", "reference"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=tailwindcss.com&sz=128" },
+      "createdAt": "2026-04-06T08:00:00.000Z",
+      "updatedAt": "2026-04-06T08:00:00.000Z"
+    },
+    {
+      "title": "Vite",
+      "url": "https://vitejs.dev",
+      "tags": ["dev", "tools"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=vitejs.dev&sz=128" },
+      "createdAt": "2026-04-07T08:00:00.000Z",
+      "updatedAt": "2026-04-07T08:00:00.000Z"
+    },
+    {
+      "title": "PostgreSQL Documentation",
+      "url": "https://www.postgresql.org/docs/",
+      "tags": ["dev", "reference"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=postgresql.org&sz=128" },
+      "createdAt": "2026-04-08T08:00:00.000Z",
+      "updatedAt": "2026-04-08T08:00:00.000Z"
+    },
+    {
+      "title": "Hacker News",
+      "url": "https://news.ycombinator.com",
+      "tags": ["news", "dev"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=news.ycombinator.com&sz=128" },
+      "createdAt": "2026-04-09T08:00:00.000Z",
+      "updatedAt": "2026-04-09T08:00:00.000Z"
+    },
+    {
+      "title": "The Verge",
+      "url": "https://www.theverge.com",
+      "tags": ["news"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=theverge.com&sz=128" },
+      "createdAt": "2026-04-10T08:00:00.000Z",
+      "updatedAt": "2026-04-10T08:00:00.000Z"
+    },
+    {
+      "title": "Ars Technica",
+      "url": "https://arstechnica.com",
+      "tags": ["news"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=arstechnica.com&sz=128" },
+      "createdAt": "2026-04-11T08:00:00.000Z",
+      "updatedAt": "2026-04-11T08:00:00.000Z"
+    },
+    {
+      "title": "BBC News",
+      "url": "https://www.bbc.com/news",
+      "tags": ["news"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=bbc.com&sz=128" },
+      "createdAt": "2026-04-12T08:00:00.000Z",
+      "updatedAt": "2026-04-12T08:00:00.000Z"
+    },
+    {
+      "title": "Figma",
+      "url": "https://www.figma.com",
+      "tags": ["design", "tools"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=figma.com&sz=128" },
+      "createdAt": "2026-04-13T08:00:00.000Z",
+      "updatedAt": "2026-04-13T08:00:00.000Z"
+    },
+    {
+      "title": "Dribbble",
+      "url": "https://dribbble.com",
+      "tags": ["design"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=dribbble.com&sz=128" },
+      "createdAt": "2026-04-14T08:00:00.000Z",
+      "updatedAt": "2026-04-14T08:00:00.000Z"
+    },
+    {
+      "title": "Behance",
+      "url": "https://www.behance.net",
+      "tags": ["design"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=behance.net&sz=128" },
+      "createdAt": "2026-04-15T08:00:00.000Z",
+      "updatedAt": "2026-04-15T08:00:00.000Z"
+    },
+    {
+      "title": "Coolors",
+      "url": "https://coolors.co",
+      "tags": ["design", "tools"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=coolors.co&sz=128" },
+      "createdAt": "2026-04-16T08:00:00.000Z",
+      "updatedAt": "2026-04-16T08:00:00.000Z"
+    },
+    {
+      "title": "Unsplash",
+      "url": "https://unsplash.com",
+      "tags": ["design"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=unsplash.com&sz=128" },
+      "createdAt": "2026-04-17T08:00:00.000Z",
+      "updatedAt": "2026-04-17T08:00:00.000Z"
+    },
+    {
+      "title": "Notion",
+      "url": "https://www.notion.so",
+      "tags": ["productivity", "tools"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=notion.so&sz=128" },
+      "createdAt": "2026-04-18T08:00:00.000Z",
+      "updatedAt": "2026-04-18T08:00:00.000Z"
+    },
+    {
+      "title": "Todoist",
+      "url": "https://todoist.com",
+      "tags": ["productivity"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=todoist.com&sz=128" },
+      "createdAt": "2026-04-19T08:00:00.000Z",
+      "updatedAt": "2026-04-19T08:00:00.000Z"
+    },
+    {
+      "title": "Trello",
+      "url": "https://trello.com",
+      "tags": ["productivity"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=trello.com&sz=128" },
+      "createdAt": "2026-04-20T08:00:00.000Z",
+      "updatedAt": "2026-04-20T08:00:00.000Z"
+    },
+    {
+      "title": "Obsidian",
+      "url": "https://obsidian.md",
+      "tags": ["productivity", "tools"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=obsidian.md&sz=128" },
+      "createdAt": "2026-04-21T08:00:00.000Z",
+      "updatedAt": "2026-04-21T08:00:00.000Z"
+    },
+    {
+      "title": "Anthropic",
+      "url": "https://www.anthropic.com",
+      "tags": ["ai", "learning"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128" },
+      "createdAt": "2026-04-22T08:00:00.000Z",
+      "updatedAt": "2026-04-22T08:00:00.000Z"
+    },
+    {
+      "title": "Claude",
+      "url": "https://claude.ai",
+      "tags": ["ai", "tools"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=claude.ai&sz=128" },
+      "createdAt": "2026-04-23T08:00:00.000Z",
+      "updatedAt": "2026-04-23T08:00:00.000Z"
+    },
+    {
+      "title": "Hugging Face",
+      "url": "https://huggingface.co",
+      "tags": ["ai", "dev", "open-source"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=huggingface.co&sz=128" },
+      "createdAt": "2026-04-24T08:00:00.000Z",
+      "updatedAt": "2026-04-24T08:00:00.000Z"
+    },
+    {
+      "title": "OpenAI",
+      "url": "https://openai.com",
+      "tags": ["ai"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=openai.com&sz=128" },
+      "createdAt": "2026-04-25T08:00:00.000Z",
+      "updatedAt": "2026-04-25T08:00:00.000Z"
+    },
+    {
+      "title": "Coursera",
+      "url": "https://www.coursera.org",
+      "tags": ["learning"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=coursera.org&sz=128" },
+      "createdAt": "2026-04-26T08:00:00.000Z",
+      "updatedAt": "2026-04-26T08:00:00.000Z"
+    },
+    {
+      "title": "Khan Academy",
+      "url": "https://www.khanacademy.org",
+      "tags": ["learning"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=khanacademy.org&sz=128" },
+      "createdAt": "2026-04-27T08:00:00.000Z",
+      "updatedAt": "2026-04-27T08:00:00.000Z"
+    },
+    {
+      "title": "freeCodeCamp",
+      "url": "https://www.freecodecamp.org",
+      "tags": ["learning", "dev", "open-source"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=freecodecamp.org&sz=128" },
+      "createdAt": "2026-04-28T08:00:00.000Z",
+      "updatedAt": "2026-04-28T08:00:00.000Z"
+    },
+    {
+      "title": "YouTube",
+      "url": "https://www.youtube.com",
+      "tags": ["fun"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=youtube.com&sz=128" },
+      "createdAt": "2026-04-29T08:00:00.000Z",
+      "updatedAt": "2026-04-29T08:00:00.000Z"
+    },
+    {
+      "title": "Reddit",
+      "url": "https://www.reddit.com",
+      "tags": ["fun", "news"],
+      "thumbnail": { "type": "url", "value": "https://www.google.com/s2/favicons?domain=reddit.com&sz=128" },
+      "createdAt": "2026-04-30T08:00:00.000Z",
+      "updatedAt": "2026-04-30T08:00:00.000Z"
+    },
+    {
+      "title": "Wikipedia",
+      "url": "https://www.wikipedia.org",
+      "tags": [],
+      "thumbnail": null,
+      "createdAt": "2026-05-01T08:00:00.000Z",
+      "updatedAt": "2026-05-01T08:00:00.000Z"
+    },
+    {
+      "title": "Example Untagged Bookmark",
+      "url": "https://example.com",
+      "tags": [],
+      "thumbnail": null,
+      "createdAt": "2026-05-02T08:00:00.000Z",
+      "updatedAt": "2026-05-02T08:00:00.000Z"
+    }
+  ]
+}
