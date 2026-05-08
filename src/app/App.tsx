@@ -275,7 +275,6 @@ function AppContent() {
       <ManageTagsModal
         open={manageTagsOpen}
         tags={tags}
-        bookmarks={bookmarks}
         onClose={() => setManageTagsOpen(false)}
         onSave={refresh}
         onTagDeleted={(id) => {
