@@ -417,4 +417,65 @@ describe('tags', () => {
     expect(caught.message).not.toContain('check constraint');
     expect(caught.message).not.toContain('Failing row');
   });
+
+  // -------------------------------------------------------------------------
+  // getBookmarkTagCounts — accurate counts independent of pagination (issue #29)
+  // -------------------------------------------------------------------------
+  describe('getBookmarkTagCounts', () => {
+    it('GETs /bookmark_tags with select=tag_id projection only', async () => {
+      fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+      const { getBookmarkTagCounts } = await import('./tags');
+      await getBookmarkTagCounts();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const url = String(fetchMock.mock.calls[0][0]);
+      expect(url).toBe('/api/bookmark_tags?select=tag_id');
+      // Lock the minimal projection — bookmark_id must NOT be requested even
+      // though it would also be RLS-restricted. A response with bookmark_id
+      // would let an XSS payload exfiltrate the user's bookmark UUIDs.
+      expect(url).not.toContain('bookmark_id');
+    });
+
+    it('passes the AbortSignal through to fetch', async () => {
+      fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+      const controller = new AbortController();
+      const { getBookmarkTagCounts } = await import('./tags');
+      await getBookmarkTagCounts({ signal: controller.signal });
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(init.signal).toBe(controller.signal);
+    });
+
+    it('aggregates tag_id occurrences into a Map<string, number>', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { tag_id: 't-a' },
+          { tag_id: 't-a' },
+          { tag_id: 't-b' },
+          { tag_id: 't-c' },
+          { tag_id: 't-a' },
+        ],
+      });
+      const { getBookmarkTagCounts } = await import('./tags');
+      const result = await getBookmarkTagCounts();
+      expect(result).toBeInstanceOf(Map);
+      expect(result.get('t-a')).toBe(3);
+      expect(result.get('t-b')).toBe(1);
+      expect(result.get('t-c')).toBe(1);
+      expect(result.size).toBe(3);
+    });
+
+    it('returns an empty Map when there are no junction rows', async () => {
+      fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+      const { getBookmarkTagCounts } = await import('./tags');
+      const result = await getBookmarkTagCounts();
+      expect(result.size).toBe(0);
+    });
+
+    it('rejects with ApiError on non-OK response (no silent fallback)', async () => {
+      fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+      const { getBookmarkTagCounts } = await import('./tags');
+      await expect(getBookmarkTagCounts()).rejects.toBeInstanceOf(ApiError);
+    });
+  });
 });
