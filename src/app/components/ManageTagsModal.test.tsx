@@ -563,6 +563,51 @@ describe('ManageTagsModal', () => {
     await waitFor(() => expect(getBookmarkTagCounts).toHaveBeenCalledTimes(2));
   });
 
+  it('clears usageByTagId on close so reopening never flashes stale counts', async () => {
+    vi.mocked(getBookmarkTagCounts).mockResolvedValueOnce(new Map([['tag-x', 5]]));
+
+    const { rerender } = render(
+      <ManageTagsModal
+        open={true}
+        tags={[makeTag({ id: 'tag-x', name: 'Personal' })]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onTagDeleted={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Used in 5 bookmarks')).toBeInTheDocument(),
+    );
+
+    rerender(
+      <ManageTagsModal
+        open={false}
+        tags={[makeTag({ id: 'tag-x', name: 'Personal' })]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onTagDeleted={vi.fn()}
+      />,
+    );
+
+    // Reopen with a never-resolving fetch so any visible count must come from
+    // local state. The fix clears state on close, so the pill must read 0.
+    vi.mocked(getBookmarkTagCounts).mockImplementationOnce(
+      () => new Promise<Map<string, number>>(() => {}),
+    );
+    rerender(
+      <ManageTagsModal
+        open={true}
+        tags={[makeTag({ id: 'tag-x', name: 'Personal' })]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        onTagDeleted={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Used in 5 bookmarks')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Used in 0 bookmarks')).toBeInTheDocument();
+  });
+
   it('aborts an in-flight count fetch when the modal closes', async () => {
     let receivedSignal: AbortSignal | undefined;
     vi.mocked(getBookmarkTagCounts).mockImplementation(async (options) => {

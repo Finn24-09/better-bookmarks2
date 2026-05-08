@@ -89,7 +89,14 @@ export function ManageTagsModal({
   const [usageByTagId, setUsageByTagId] = useState<Map<string, number>>(new Map());
 
   useEffect(() => {
-    if (!open) return;
+    // The modal stays mounted across open/close cycles, so state held here
+    // survives a close. Clear the previous session's counts immediately on
+    // close, otherwise reopening flashes stale numbers until the fresh fetch
+    // resolves (PR #33 review feedback).
+    if (!open) {
+      setUsageByTagId(new Map());
+      return;
+    }
     const controller = new AbortController();
     (async () => {
       try {
