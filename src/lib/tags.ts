@@ -171,3 +171,29 @@ export async function setBookmarkTags(
     ),
   ]);
 }
+
+// ---------------------------------------------------------------------------
+// Tag usage counts (per tag, across ALL of the user's bookmarks)
+//
+// Returns a tagId -> count map covering every bookmark the user owns,
+// not just the page currently loaded into the UI. The DB enforces ownership
+// via RLS on `api.bookmark_tags` (see docker/db/init/03_rls.sql) — the API
+// can only return junction rows whose bookmark belongs to the caller.
+//
+// We project to `tag_id` only with `select=tag_id` so the response carries
+// no plaintext, no encrypted blobs, and not even bookmark IDs — just the
+// tag UUIDs we need to count.
+// ---------------------------------------------------------------------------
+export async function getBookmarkTagCounts(
+  options?: { signal?: AbortSignal },
+): Promise<Map<string, number>> {
+  const rows = await apiFetch<{ tag_id: string }[]>(
+    '/bookmark_tags?select=tag_id',
+    { signal: options?.signal },
+  );
+  const counts = new Map<string, number>();
+  for (const row of rows ?? []) {
+    counts.set(row.tag_id, (counts.get(row.tag_id) ?? 0) + 1);
+  }
+  return counts;
+}
