@@ -1,0 +1,27 @@
+name: easy-versioning
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: easy-versioning-${{ github.ref }}
+  cancel-in-progress: false
+
+# The action does not use the default GITHUB_TOKEN; it mints its own token
+# from the easy-versioning GitHub App via APP_ID + PRIVATE_KEY.
+permissions: {}
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: Finn24-09/easy-versioning@v1.0.0
+        with:
+          app-id: ${{ secrets.EASY_VERSIONING_APP_ID }}
+          private-key: ${{ secrets.EASY_VERSIONING_PRIVATE_KEY }}
