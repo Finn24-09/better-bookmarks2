@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
-      - uses: Finn24-09/easy-versioning@v1.0.0
+      - uses: Finn24-09/easy-versioning@v1.1.0
         with:
           app-id: ${{ secrets.EASY_VERSIONING_APP_ID }}
           private-key: ${{ secrets.EASY_VERSIONING_PRIVATE_KEY }}
