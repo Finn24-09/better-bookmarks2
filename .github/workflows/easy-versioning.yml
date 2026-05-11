@@ -8,9 +8,13 @@ concurrency:
   group: easy-versioning-${{ github.ref }}
   cancel-in-progress: false
 
-# The action does not use the default GITHUB_TOKEN; it mints its own token
-# from the easy-versioning GitHub App via APP_ID + PRIVATE_KEY.
-permissions: {}
+# actions/checkout below needs contents: read to clone the repo. The
+# easy-versioning action itself does NOT use GITHUB_TOKEN — it authenticates
+# as a GitHub App via app-id + private-key and mints its own short-lived
+# installation token for pushing the bump commit. So contents: read is the
+# only permission this workflow grants.
+permissions:
+  contents: read
 
 jobs:
   bump:
