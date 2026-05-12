@@ -14,6 +14,10 @@ services:
     ports:
       - "5001:5001"  # expose for Vite dev proxy (npm run dev)
 
+  metadata-fetcher:
+    ports:
+      - "5002:5002"  # expose for Vite dev proxy (npm run dev)
+
   # Run with: docker compose --profile adminer up
   adminer:
     image: adminer:4.8.1

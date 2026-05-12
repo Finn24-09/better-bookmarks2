@@ -2,6 +2,16 @@ networks:
   betterbookmarks2:
     name: betterbookmarks2
     driver: bridge
+  # Dedicated network for the metadata-fetcher. The fetcher is the only
+  # service in the deployment that dials user-supplied URLs, so an SSRF
+  # bypass or a CVE in its HTTP / parser stack must NOT have an L3 path to
+  # `db` or `postgrest`. Only `frontend` (nginx) bridges both networks so it
+  # can reverse-proxy /api/title/ to the fetcher. `internal: false` because
+  # the fetcher legitimately needs outbound internet access.
+  metadata_net:
+    name: metadata_net
+    driver: bridge
+    internal: false
 
 services:
   db:
@@ -114,6 +124,7 @@ services:
           cpus: "0.5"
     networks:
       - betterbookmarks2
+      - metadata_net          # nginx reverse-proxies /api/title/ to metadata-fetcher
 
   email-service:
     build:
@@ -160,6 +171,44 @@ services:
       - betterbookmarks2
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:5001/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  metadata-fetcher:
+    build:
+      context: ./services/metadata-fetcher
+      dockerfile: Dockerfile
+    container_name: bb2-metadata-fetcher
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "5002"
+      # Shares the PostgREST JWT secret so the service can verify user
+      # tokens. The service runs jose with an explicit HS256 algorithm
+      # whitelist — it cannot forge tokens (it only verifies). A
+      # compromised metadata-fetcher container could theoretically forge
+      # JWTs, mitigated by the dedicated `metadata_net` network: even with
+      # a forged token the container has no L3 path to db / postgrest.
+      JWT_SECRET: "${PGRST_JWT_SECRET}"
+      JWT_AUDIENCE: "metadata-svc"
+      LOG_LEVEL: "info"
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.5"
+    networks:
+      - metadata_net           # only network — no L3 reach to db or postgrest
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5002/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3

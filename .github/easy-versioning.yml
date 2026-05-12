@@ -1,8 +1,9 @@
 # easy-versioning configuration.
 #
-# Two independently versioned packages live in this repo:
-#   - webapp (React frontend, root package.json)
-#   - email-service (Fastify microservice, services/email/package.json)
+# Three independently versioned packages live in this repo:
+#   - webapp           (React frontend, root package.json)
+#   - email-service    (Fastify microservice, services/email/package.json)
+#   - metadata-fetcher (Fastify microservice, services/metadata-fetcher/package.json)
 #
 # Each package is bumped only when files under its `triggers` change. Anything
 # matched by `ignore` never causes a bump on its own.
@@ -36,3 +37,10 @@ packages:
   - path: services/email
     triggers:
       - "services/email/**"
+
+  # Metadata-fetcher microservice — services/metadata-fetcher/package.json.
+  # Scopes future URL-metadata routes (titles, favicons, OG previews) under one
+  # hardened core, so any change inside the service folder bumps its version.
+  - path: services/metadata-fetcher
+    triggers:
+      - "services/metadata-fetcher/**"
