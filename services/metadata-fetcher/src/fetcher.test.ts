@@ -298,11 +298,12 @@ describe('fetcher — response status policy', () => {
 });
 
 describe('fetcher — body size cap', () => {
-  it('aborts the stream once body exceeds the cap', async () => {
-    const big = Buffer.alloc(1024 * 256, 0x61);   // 256 KiB chunks
+  it('aborts the stream once body exceeds the cap (no </head> backstop)', async () => {
+    // Body with NO </head> token so the early-stop never fires; cap path
+    // is the only way out. 6 × 256 KiB = 1.5 MiB; override cap to 1 MiB.
+    const big = Buffer.alloc(1024 * 256, 0x61);
     const stream = new Readable({
       read() {
-        // emit 6 chunks → 1.5 MiB total, exceeds 1 MiB cap
         let emitted = 0;
         const id = setInterval(() => {
           if (emitted >= 6) {
@@ -321,11 +322,16 @@ describe('fetcher — body size cap', () => {
       body: stream,
     });
     await expect(
-      fetchHead('https://example.com/', { resolver: publicResolver, dispatch }),
+      fetchHead('https://example.com/', {
+        resolver: publicResolver,
+        dispatch,
+        bodyLimitBytes: 1 * 1024 * 1024,
+      }),
     ).rejects.toBeInstanceOf(FetchBodyTooLargeError);
   });
 
   it('respects a custom bodyLimitBytes override', async () => {
+    // 1 KiB of `x` bytes — no </head>, so early-stop never fires.
     const dispatch: DispatchFn = async () => ({
       statusCode: 200,
       headers: { 'content-type': 'text/html' },
@@ -334,6 +340,154 @@ describe('fetcher — body size cap', () => {
     await expect(
       fetchHead('https://example.com/', { resolver: publicResolver, dispatch, bodyLimitBytes: 100 }),
     ).rejects.toBeInstanceOf(FetchBodyTooLargeError);
+  });
+});
+
+describe('fetcher — streaming early-stop on </head>', () => {
+  it('5 MiB body with </head> at 100 KiB succeeds without reading past head', async () => {
+    // Construct a body that would blow past any reasonable cap if read in
+    // full, but whose <head> ends at byte ~100 KiB. The early-stop path
+    // should resolve well before the cap fires.
+    const head = `<head>${'a'.repeat(100 * 1024)}<title>Early Stop OK</title></head>`;
+    const headBuf = Buffer.from(head, 'utf-8');
+    const filler = Buffer.alloc(256 * 1024, 0x61);
+    let chunksEmitted = 0;
+    const stream = new Readable({
+      read() {
+        if (chunksEmitted === 0) {
+          this.push(headBuf);
+          chunksEmitted++;
+          return;
+        }
+        if (chunksEmitted >= 20) {           // 20 × 256 KiB = 5 MiB filler
+          this.push(null);
+          return;
+        }
+        this.push(filler);
+        chunksEmitted++;
+      },
+    });
+    const dispatch: DispatchFn = async () => ({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      body: stream,
+    });
+    const r = await fetchHead('https://example.com/', {
+      resolver: publicResolver,
+      dispatch,
+      bodyLimitBytes: 1 * 1024 * 1024,    // cap below total body — proves early-stop
+    });
+    expect(r.bytes.toString('utf-8')).toContain('<title>Early Stop OK</title>');
+    // Buffer is bounded by the head size + at most one chunk of overshoot,
+    // never the full 5 MiB body.
+    expect(r.bytes.length).toBeLessThan(headBuf.length + 256 * 1024);
+  });
+
+  it('</head> split across two chunks still triggers early-stop', async () => {
+    // Split exactly so the tag boundary lands in the middle of `</head>`.
+    // Chunks are kept under the per-chunk size guard. The point of the
+    // test is that the head-end token straddles the chunk boundary —
+    // total size is irrelevant once we've proved the tail-overlap works.
+    const before = `<head><title>Split Test</title></hea`;
+    const after = `d><body>kept</body>`;
+    const stream = new Readable({
+      read() {
+        this.push(Buffer.from(before, 'utf-8'));
+        this.push(Buffer.from(after, 'utf-8'));
+        this.push(null);
+      },
+    });
+    const dispatch: DispatchFn = async () => ({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      body: stream,
+    });
+    const r = await fetchHead('https://example.com/', {
+      resolver: publicResolver,
+      dispatch,
+      bodyLimitBytes: 1 * 1024 * 1024,
+    });
+    expect(r.bytes.toString('utf-8')).toContain('Split Test');
+  });
+
+  it('single chunk larger than the cap is rejected even if </head> is at offset 0', async () => {
+    // Defends against a hostile upstream coalescing a giant frame to bypass
+    // the cumulative-total cap via the search-before-cap path. Per-chunk
+    // ceiling fires regardless of head position inside the chunk.
+    const huge = Buffer.concat([
+      Buffer.from('</head>filler', 'utf-8'),
+      Buffer.alloc(3 * 1024 * 1024, 0x61),         // 3 MiB filler
+    ]);
+    const stream = new Readable({
+      read() { this.push(huge); this.push(null); },
+    });
+    const dispatch: DispatchFn = async () => ({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      body: stream,
+    });
+    await expect(
+      fetchHead('https://example.com/', {
+        resolver: publicResolver,
+        dispatch,
+        bodyLimitBytes: 2 * 1024 * 1024,
+      }),
+    ).rejects.toBeInstanceOf(FetchBodyTooLargeError);
+  });
+
+  it('reports terminationReason head-close on </head> match', async () => {
+    const dispatch: DispatchFn = async () => ({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      body: bodyStream('<head><title>X</title></head><body>y</body>'),
+    });
+    const r = await fetchHead('https://example.com/', { resolver: publicResolver, dispatch });
+    expect(r.terminationReason).toBe('head-close');
+  });
+
+  it('reports terminationReason body-open when </head> is omitted', async () => {
+    const dispatch: DispatchFn = async () => ({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      body: bodyStream('<head><title>X</title><body>y</body>'),
+    });
+    const r = await fetchHead('https://example.com/', { resolver: publicResolver, dispatch });
+    expect(r.terminationReason).toBe('body-open');
+  });
+
+  it('reports terminationReason eof for a tiny response with no head-end token', async () => {
+    const dispatch: DispatchFn = async () => ({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      body: bodyStream('<title>tiny</title>'),    // no </head>, no <body>
+    });
+    const r = await fetchHead('https://example.com/', { resolver: publicResolver, dispatch });
+    expect(r.terminationReason).toBe('eof');
+  });
+
+  it('<body> opener triggers early-stop when </head> is omitted (HTML5)', async () => {
+    // HTML5 makes </head> optional in source; a <body> open implies head end.
+    // Body kept compact so the chunk fits under the per-chunk cap; the
+    // test's intent is that <body[\s>] triggers early-stop when </head>
+    // is missing, not that the body is large.
+    const body = `<head><meta property="og:title" content="No End-Head"><body>kept</body>`;
+    const stream = new Readable({
+      read() {
+        this.push(Buffer.from(body, 'utf-8'));
+        this.push(null);
+      },
+    });
+    const dispatch: DispatchFn = async () => ({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      body: stream,
+    });
+    const r = await fetchHead('https://example.com/', {
+      resolver: publicResolver,
+      dispatch,
+      bodyLimitBytes: 1 * 1024 * 1024,
+    });
+    expect(r.bytes.toString('utf-8')).toContain('No End-Head');
   });
 });
 

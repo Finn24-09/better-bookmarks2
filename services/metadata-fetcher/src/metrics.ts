@@ -58,3 +58,18 @@ export const upstreamLatencySeconds = new Histogram({
   buckets: LATENCY_BUCKETS,
   registers: [registry],
 });
+
+// Body-read termination counter. Lets operators detect a regression in the
+// streaming early-stop on </head>: if `eof` starts dominating where
+// `head-close` used to, the fetcher is reading more bytes than necessary
+// and the cap is one bad change away from firing on real pages. Label
+// values are a bounded enum — no cardinality risk.
+export const BODY_TERMINATION_REASONS = ['head-close', 'body-open', 'eof'] as const;
+export type BodyTerminationReasonLabel = typeof BODY_TERMINATION_REASONS[number];
+export const bodyTerminationTotal = new Counter({
+  name: 'metadata_fetcher_body_termination_total',
+  help: 'How the body read for a successful fetch terminated',
+  labelNames: ['reason'] as const,
+  registers: [registry],
+});
+for (const r of BODY_TERMINATION_REASONS) bodyTerminationTotal.labels(r).inc(0);

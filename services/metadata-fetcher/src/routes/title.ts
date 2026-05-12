@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { config } from '../config.js';
 import { verifyJwt } from '../jwt.js';
 import { rateLimitFor } from '../rateLimit.js';
 import {
@@ -17,7 +18,7 @@ import {
 } from '../fetcher.js';
 import { extractTitle } from '../titleExtractor.js';
 import { Semaphore, PerKeySemaphore } from '../concurrency.js';
-import { requestsTotal, type Outcome, dnsLatencySeconds as _dns, upstreamLatencySeconds } from '../metrics.js';
+import { requestsTotal, type Outcome, dnsLatencySeconds as _dns, upstreamLatencySeconds, bodyTerminationTotal } from '../metrics.js';
 import { sanitizeErrorChain } from '../errorSanitizer.js';
 import type { Resolver } from '../ssrfGuard.js';
 
@@ -107,17 +108,21 @@ export function titleRoute(deps: RouteDeps = {}): FastifyPluginAsync {
         try {
           const fetchOpts: FetchOptions = {
             onHop: ({ host }) => { req.targetHostname = host; },
+            // Default the body cap from the env-derived config so operators
+            // can tune MAX_BODY_BYTES without a code change. The test-only
+            // `deps.bodyLimitBytes` override still wins when supplied.
+            bodyLimitBytes: deps.bodyLimitBytes ?? config.MAX_BODY_BYTES,
           };
           if (deps.dispatch !== undefined) fetchOpts.dispatch = deps.dispatch;
           if (deps.resolver !== undefined) fetchOpts.resolver = deps.resolver;
           if (deps.timeoutMs !== undefined) fetchOpts.timeoutMs = deps.timeoutMs;
-          if (deps.bodyLimitBytes !== undefined) fetchOpts.bodyLimitBytes = deps.bodyLimitBytes;
-          const { bytes, charset } = await fetchHead(parsed.data.url, fetchOpts);
+          const { bytes, charset, terminationReason } = await fetchHead(parsed.data.url, fetchOpts);
           const title = extractTitle(bytes, charset);
 
           const elapsed = Number(process.hrtime.bigint() - start) / 1e9;
           upstreamLatencySeconds.observe(elapsed);
           requestsTotal.labels('ok').inc();
+          bodyTerminationTotal.labels(terminationReason).inc();
           return reply.status(200).send({ title });
         } catch (err) {
           const { status, body, outcome, logIt } = classifyFetcherError(err);

@@ -14,6 +14,10 @@ vi.mock('../config.js', () => ({
     PORT: 5002,
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
+    // Small cap exercises the wiring from config → route → fetcher.
+    // Tests that need a different cap pass `bodyLimitBytes` via routeDeps;
+    // the route gives that override precedence.
+    MAX_BODY_BYTES: 256 * 1024,
   },
 }));
 
@@ -211,6 +215,29 @@ describe('POST /title — fetcher integration', () => {
   // useful log line. The fix sets ignoreTrailingSlash:true in index.ts;
   // this test wires the modal-facing test app the same way and asserts both
   // forms route to the same handler.
+  // Regression: config.MAX_BODY_BYTES (the operator-tunable env override)
+  // must actually flow into the fetcher when the route is constructed with
+  // no body-limit override. The mock above sets the config value to 256 KiB;
+  // a 300 KiB body with no </head> exceeds that cap and must 422.
+  it('honours config.MAX_BODY_BYTES when no deps.bodyLimitBytes is provided', async () => {
+    // 300 KiB body, no </head> → cap-fallback path fires at the config value.
+    const big = 'x'.repeat(300 * 1024);
+    const { dispatch } = makeDispatch({ body: big });
+    const app = await buildTestApp({ resolver: publicResolver, dispatch });
+    try {
+      const token = await makeToken();
+      const res = await app.inject({
+        method: 'POST', url: '/title',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        payload: { url: 'https://example.com/' },
+      });
+      // 422 from FetchBodyTooLargeError → route maps to "Target response too large".
+      expect(res.statusCode).toBe(422);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('200 on POST /title/ (trailing slash) — regression for dev-proxy bug', async () => {
     const { dispatch } = makeDispatch({ body: '<title>Trailing Slash OK</title>' });
     const app = await buildTestApp({ resolver: publicResolver, dispatch });

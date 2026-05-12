@@ -203,7 +203,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128m
+          # 256 MiB accommodates the 2 MiB body cap (operator-overridable up
+          # to 8 MiB via MAX_BODY_BYTES) under 32 concurrent in-flight reads,
+          # plus Node + Fastify + htmlparser2 + prom-client baseline.
+          memory: 256m
           cpus: "0.5"
     networks:
       - metadata_net           # only network — no L3 reach to db or postgrest

@@ -153,6 +153,15 @@ let token: string;
 beforeAll(async () => {
   target = new MockTarget();
   await target.start();
+  // Heavy-page body: 1.5 MiB total with title at byte 600 KiB and </head>
+  // shortly after — same shape as a YouTube watch page. Without the
+  // streaming early-stop this would 422 the 1 MiB cap; with it we succeed
+  // and return the title.
+  const heavyPadding = 'x'.repeat(600 * 1024);
+  const heavyTail = 'y'.repeat(900 * 1024);
+  const heavyBody =
+    `<head><meta property="og:title" content="Heavy Page Title">${heavyPadding}</head><body>${heavyTail}</body>`;
+
   target
     .set('/ok', { body: '<title>Real Server Title</title>' })
     .set('/pdf', { contentType: 'application/pdf', body: '%PDF-1.4' })
@@ -161,7 +170,8 @@ beforeAll(async () => {
     .set('/r-private', { location: 'http://127.0.0.1/internal' })
     .set('/r-public-host', { location: 'https://second.example/dst' })
     .set('/dst', { body: '<title>Redirected Page</title>' })
-    .set('/no-title', { body: '<head></head><body>no head title</body>' });
+    .set('/no-title', { body: '<head></head><body>no head title</body>' })
+    .set('/heavy', { body: heavyBody });
   app = await buildApp(localDispatch(target), publicResolver);
   token = await makeToken();
 });
@@ -224,6 +234,16 @@ describe('integration: real HTTP target + full Fastify pipeline', () => {
     const res = await post('https://target.example/no-title');
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ title: null });
+  });
+
+  // Regression for the YouTube failure mode: heavy HTML (1.5 MiB total) with
+  // the title past byte 600 KiB. Pre-streaming-fix this would 422 because the
+  // body cap was 1 MiB and the title sat past it; the streaming early-stop
+  // resolves once </head> is in.
+  it('heavy page (1.5 MiB body with title at byte 600 KiB) succeeds via streaming early-stop', async () => {
+    const res = await post('https://target.example/heavy');
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ title: 'Heavy Page Title' });
   });
 });
 

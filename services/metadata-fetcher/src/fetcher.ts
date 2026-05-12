@@ -42,6 +42,11 @@ export type FetcherError =
 export interface FetchResult {
   bytes: Buffer;
   charset: string;
+  /** How the body read terminated. Telemetry only — the route handler maps
+   *  this to a Prometheus counter so operators can detect regressions in
+   *  the streaming early-stop (e.g. a future change that always falls
+   *  back to `eof` would be invisible without this signal). */
+  terminationReason: BodyTerminationReason;
 }
 
 // Versionless UA — see spec §5.4. Includes a contact URL so upstream
@@ -52,7 +57,14 @@ export const USER_AGENT = 'better-bookmarks-metadata-fetcher (+https://github.co
 // the runtime banner; UA is intentionally versionless.
 void _version;
 
-export const MAX_BODY_BYTES = 1 * 1024 * 1024;
+// Default body cap. The runtime value is sourced from `config.MAX_BODY_BYTES`
+// (env-overridable, see services/metadata-fetcher/src/config.ts), letting
+// operators raise the cap without a code change as the real-world web gets
+// heavier. The default and ceiling are tuned for the current 256 MiB
+// container limit; raising the cap above 8 MiB requires a matching bump on
+// the compose service. Streaming early-stop on </head> (see readBodyWithCap)
+// means typical pages resolve well under whichever cap is configured.
+export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const MAX_REDIRECTS = 3;
 export const TOTAL_TIMEOUT_MS = 5_000;
 
@@ -142,39 +154,106 @@ function isCompressed(headers: DispatchResponse['headers']): boolean {
   return /\b(?:gzip|br|deflate|compress)\b/i.test(encoding);
 }
 
+// Streaming early-stop: the title extractor only needs <head>, so the
+// fetcher watches for `</head>` or `<body[\s>]` in the incoming bytes and
+// resolves with the partial buffer as soon as either appears. For pages
+// like YouTube (~1.17 MiB total HTML, head ends around 615 KB) this means
+// we stop reading well before the cap; without it the title sits past the
+// 1 MiB cap and the request fails with FetchBodyTooLargeError. The cap
+// stays as a backstop for pathological pages with no </head>.
+//
+// The regex match is performed on a UTF-8 decode of (last 16 bytes of the
+// previous chunk + current chunk) so a head-close token split across a
+// TCP/buffer boundary is still caught. `</head>` and `<body` are pure
+// ASCII so the UTF-8 decode is correct regardless of the document's
+// declared charset; the 16-byte overlap is longer than any plausible
+// head-end token.
+const HEAD_END_RE = /<\/head\s*>|<body[\s>]/i;
+const HEAD_END_OVERLAP_BYTES = 16;
+
+export type BodyTerminationReason = 'head-close' | 'body-open' | 'eof';
+
 async function readBodyWithCap(
   res: DispatchResponse,
   cap: number,
   signal: AbortSignal,
-): Promise<Buffer> {
-  return new Promise<Buffer>((resolve, reject) => {
+): Promise<{ bytes: Buffer; reason: BodyTerminationReason }> {
+  return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
     let aborted = false;
+    let earlyResolved = false;
+    let headEndSeen = false;
+    let tailOverlap = Buffer.alloc(0);
+    // One-shot decoder reused across chunks. We deliberately omit
+    // { stream: true }: the 16-byte byte-level tailOverlap already handles
+    // tag boundaries across chunks, and stream-mode would carry residual
+    // UTF-8 continuation-byte state into the next decode, double-feeding
+    // the overlap bytes. Since `</head>` and `<body` are pure ASCII, the
+    // one-shot decode produces correct match results regardless of any
+    // multi-byte sequences that happen to straddle the chunk boundary.
+    const headSearchDecoder = new TextDecoder('utf-8', { fatal: false });
+    const cleanupAbortListener = () => signal.removeEventListener('abort', onAbort);
     const abort = (err: Error) => {
-      if (aborted) return;
+      if (aborted || earlyResolved) return;
       aborted = true;
+      cleanupAbortListener();
       res.body.destroy(err);
       reject(err);
     };
     const onAbort = () => abort(new FetchTimeoutError('timeout'));
     signal.addEventListener('abort', onAbort, { once: true });
     res.body.on('data', (chunk: Buffer) => {
+      if (aborted || earlyResolved) return;
+      // Hard per-chunk ceiling. Real-world TLS/HTTP chunks are bounded by
+      // record size (~16 KiB) and Node's highWaterMark (~64 KiB), but a
+      // hostile upstream can in theory coalesce a giant frame. Rejecting
+      // any single chunk that is itself larger than the cap defeats the
+      // "search-before-cap" path being abused to pull unbounded bytes
+      // into memory.
+      if (chunk.length > cap) {
+        abort(new FetchBodyTooLargeError(`single chunk exceeds ${cap} bytes`));
+        return;
+      }
       total += chunk.length;
+      chunks.push(chunk);
+      // Run the early-stop search BEFORE the cumulative-total cap check: a
+      // chunk that pushes total past the cap can still contain `</head>`
+      // near its start (the YouTube failure mode this whole codepath
+      // exists for), and resolving early is preferable to aborting that
+      // request.
+      if (!headEndSeen) {
+        const searchBuf = Buffer.concat([tailOverlap, chunk]);
+        const match = HEAD_END_RE.exec(headSearchDecoder.decode(searchBuf));
+        if (match) {
+          headEndSeen = true;
+          earlyResolved = true;
+          cleanupAbortListener();
+          // Tearing down the response stream stops further bytes being
+          // read off the wire — fast-path completion for the common case.
+          res.body.destroy();
+          const reason: BodyTerminationReason =
+            match[0].toLowerCase().startsWith('</head') ? 'head-close' : 'body-open';
+          resolve({ bytes: Buffer.concat(chunks), reason });
+          return;
+        }
+        tailOverlap = searchBuf.length > HEAD_END_OVERLAP_BYTES
+          ? searchBuf.subarray(searchBuf.length - HEAD_END_OVERLAP_BYTES)
+          : searchBuf;
+      }
       if (total > cap) {
         abort(new FetchBodyTooLargeError(`body exceeded ${cap} bytes`));
         return;
       }
-      chunks.push(chunk);
     });
     res.body.on('end', () => {
-      if (aborted) return;
-      signal.removeEventListener('abort', onAbort);
-      resolve(Buffer.concat(chunks));
+      if (aborted || earlyResolved) return;
+      cleanupAbortListener();
+      resolve({ bytes: Buffer.concat(chunks), reason: 'eof' });
     });
     res.body.on('error', (err: Error) => {
-      if (aborted) return;
-      signal.removeEventListener('abort', onAbort);
+      if (aborted || earlyResolved) return;
+      cleanupAbortListener();
       reject(err);
     });
   });
@@ -317,8 +396,8 @@ export async function fetchHead(url: string, opts: FetchOptions = {}): Promise<F
       }
 
       const charset = parseCharset(contentType);
-      const bytes = await readBodyWithCap(res, bodyLimit, abortController.signal);
-      return { bytes, charset };
+      const { bytes, reason } = await readBodyWithCap(res, bodyLimit, abortController.signal);
+      return { bytes, charset, terminationReason: reason };
     }
     // Should be unreachable — loop exits via return or throw.
     throw new FetchTooManyRedirectsError(`exceeded ${maxRedirects} redirects`);

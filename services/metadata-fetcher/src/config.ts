@@ -13,6 +13,16 @@ const envSchema = z.object({
   PORT:          z.coerce.number().int().positive().default(5002),
   NODE_ENV:      z.enum(['development', 'production', 'test']).default('production'),
   LOG_LEVEL:     z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  // Backstop response body cap. The streaming early-stop on </head> means
+  // typical pages resolve well under this; the cap fires only on
+  // pathological / malformed pages without </head>. Bounds chosen to keep
+  // operator overrides safe: 256 KiB floor (smaller is unsafe even for
+  // simple pages); 8 MiB ceiling (32 concurrent × 8 MiB = 256 MiB; would
+  // require a matching mem_limit bump on the compose service).
+  MAX_BODY_BYTES: z.coerce.number().int()
+    .min(256 * 1024)
+    .max(8 * 1024 * 1024)
+    .default(2 * 1024 * 1024),
 });
 
 export type Config = z.infer<typeof envSchema>;
