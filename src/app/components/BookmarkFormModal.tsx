@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
-import { X, Trash2, Upload } from "lucide-react";
+import { X, Trash2, Upload, RefreshCw, Check } from "lucide-react";
 import { toast } from "sonner";
 import { TagMultiSelect } from "./TagMultiSelect";
 import {
@@ -14,6 +14,7 @@ import { cn } from "./ui/utils";
 import { createBookmark, updateBookmark, deleteBookmark, MAX_TITLE_LENGTH, MAX_URL_LENGTH } from "../../lib/bookmarks";
 import { createTag, setBookmarkTags, Tag } from "../../lib/tags";
 import { uploadThumbnail, deleteThumbnailImage } from "../../lib/thumbnails";
+import { fetchBookmarkTitle, TitleFetchError } from "../../lib/titleFetch";
 import { useAuth } from "../contexts/AuthContext";
 
 interface BookmarkFormModalProps {
@@ -73,6 +74,8 @@ export function BookmarkFormModal({
     handleSubmit,
     reset,
     setValue,
+    watch,
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<FormFields>({
     values: {
@@ -81,6 +84,60 @@ export function BookmarkFormModal({
       thumbnailUrl: initialData?.thumbnailUrl ?? "",
     },
   });
+
+  // Auto-fill title from the URL's page <title>. The button is visible only
+  // when the URL field passes RHF validation (errors.url is undefined AND a
+  // value is present). The form's default mode is onSubmit, so we trigger
+  // URL validation on every change to keep errors.url current — this keeps
+  // visibility tied to the same validate fn the form uses on submit (no
+  // duplicate URL-parsing logic that could drift).
+  const [autoTitlePhase, setAutoTitlePhase] = useState<"idle" | "loading" | "success">("idle");
+  const autoTitleAbortRef = useRef<AbortController | null>(null);
+  const urlValue = watch("url");
+  useEffect(() => {
+    if (urlValue.length > 0) void trigger("url");
+  }, [urlValue, trigger]);
+  const urlValid = !errors.url && urlValue.length > 0;
+
+  // Cancel any in-flight auto-fill when the modal closes / unmounts.
+  useEffect(() => {
+    return () => {
+      autoTitleAbortRef.current?.abort();
+      autoTitleAbortRef.current = null;
+    };
+  }, []);
+
+  const handleAutoFillTitle = async () => {
+    // Cancel any previous fetch in-flight; second click acts as cancel+restart.
+    autoTitleAbortRef.current?.abort();
+    const controller = new AbortController();
+    autoTitleAbortRef.current = controller;
+
+    setAutoTitlePhase("loading");
+    try {
+      const title = await fetchBookmarkTitle(urlValue, controller.signal);
+      if (controller.signal.aborted) return;
+      if (title === null) {
+        toast.info("No title found on that page. Please enter one.");
+        setAutoTitlePhase("idle");
+        return;
+      }
+      setValue("title", title, { shouldDirty: true, shouldValidate: true });
+      setAutoTitlePhase("success");
+      // Brief success flash then back to idle.
+      setTimeout(() => {
+        if (autoTitleAbortRef.current === controller) setAutoTitlePhase("idle");
+      }, 600);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      if (err instanceof TitleFetchError && err.kind === "aborted") {
+        setAutoTitlePhase("idle");
+        return;
+      }
+      toast.error("Couldn't fetch title. Please enter it manually.");
+      setAutoTitlePhase("idle");
+    }
+  };
 
   // Sync available tags list when the prop changes (after a new tag is created
   // globally by the parent).
@@ -106,6 +163,12 @@ export function BookmarkFormModal({
   }, [open, initialData, reset]);
 
   const handleClose = () => {
+    // Cancel any in-flight title fetch so its eventual response cannot
+    // overwrite a future modal's title field after this one has closed.
+    autoTitleAbortRef.current?.abort();
+    autoTitleAbortRef.current = null;
+    setAutoTitlePhase("idle");
+
     // Clean up any file uploaded this session that was never saved to a bookmark.
     const idToDelete = unsavedFileIdRef.current;
     unsavedFileIdRef.current = null;
@@ -152,6 +215,10 @@ export function BookmarkFormModal({
 
   const onSubmit = async (data: FormFields) => {
     if (!cryptoKey || !userId) return;
+    // Abort any in-flight title fetch so its eventual response cannot
+    // overwrite the saved title (or the next modal's title) after submit.
+    autoTitleAbortRef.current?.abort();
+    autoTitleAbortRef.current = null;
     try {
       // If the user replaced or removed an existing saved thumbnail, delete the
       // old image now that the save is confirmed.
@@ -255,20 +322,47 @@ export function BookmarkFormModal({
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-sm text-white/70">Title</label>
-                <input
-                  type="text"
-                  placeholder="Enter bookmark title…"
-                  className={errors.title ? errorInputCls : inputCls}
-                  // +1 lets the user type one char past the cap so the inline error fires (mirrors ManageTagsModal).
-                  maxLength={MAX_TITLE_LENGTH + 1}
-                  {...register("title", {
-                    required: "Title is required",
-                    maxLength: {
-                      value: MAX_TITLE_LENGTH,
-                      message: `Title must be ${MAX_TITLE_LENGTH} characters or fewer`,
-                    },
-                  })}
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Enter bookmark title…"
+                    className={cn(
+                      errors.title ? errorInputCls : inputCls,
+                      urlValid && "pr-11",
+                    )}
+                    // +1 lets the user type one char past the cap so the inline error fires (mirrors ManageTagsModal).
+                    maxLength={MAX_TITLE_LENGTH + 1}
+                    {...register("title", {
+                      required: "Title is required",
+                      maxLength: {
+                        value: MAX_TITLE_LENGTH,
+                        message: `Title must be ${MAX_TITLE_LENGTH} characters or fewer`,
+                      },
+                    })}
+                  />
+                  {urlValid && (
+                    <button
+                      type="button"
+                      onClick={handleAutoFillTitle}
+                      disabled={isSubmitting}
+                      aria-label={
+                        autoTitlePhase === "loading"
+                          ? "Cancel auto-fill"
+                          : "Auto-fill title from URL"
+                      }
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5 active:scale-95 transition-all duration-200 disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      {autoTitlePhase === "success" ? (
+                        <Check className="w-4 h-4" aria-hidden="true" />
+                      ) : (
+                        <RefreshCw
+                          className={cn("w-4 h-4", autoTitlePhase === "loading" && "animate-spin")}
+                          aria-hidden="true"
+                        />
+                      )}
+                    </button>
+                  )}
+                </div>
                 {errors.title && (
                   <p className="text-xs text-red-400">{errors.title.message}</p>
                 )}

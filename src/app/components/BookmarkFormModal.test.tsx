@@ -41,12 +41,20 @@ vi.mock('../../lib/thumbnails', () => ({
 }));
 
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}));
+
+vi.mock('../../lib/titleFetch', () => ({
+  fetchBookmarkTitle: vi.fn(),
+  TitleFetchError: class TitleFetchError extends Error {
+    constructor(public kind: string) { super(kind); }
+  },
 }));
 
 import { createBookmark, updateBookmark, deleteBookmark } from '../../lib/bookmarks';
 import { setBookmarkTags } from '../../lib/tags';
 import { uploadThumbnail, deleteThumbnailImage } from '../../lib/thumbnails';
+import { fetchBookmarkTitle, TitleFetchError } from '../../lib/titleFetch';
 import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
@@ -474,5 +482,94 @@ describe('BookmarkFormModal', () => {
 
     expect(await screen.findByText(/2000 characters or fewer/i)).toBeInTheDocument();
     expect(createBookmark).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Auto-fill title button (metadata-fetcher integration)
+  // ---------------------------------------------------------------------------
+  describe('auto-fill title button', () => {
+    it('hidden when URL field is empty', () => {
+      renderAdd();
+      expect(screen.queryByRole('button', { name: /auto-fill title/i })).not.toBeInTheDocument();
+    });
+
+    it('hidden when URL is malformed (fails RHF validate)', async () => {
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'not-a-url' } });
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: /auto-fill title/i })).not.toBeInTheDocument(),
+      );
+    });
+
+    it('visible when URL is a valid http(s) value', () => {
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      expect(screen.getByRole('button', { name: /auto-fill title/i })).toBeInTheDocument();
+    });
+
+    it('on success: fills the title field via setValue', async () => {
+      vi.mocked(fetchBookmarkTitle).mockResolvedValueOnce('Fetched Title');
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      fireEvent.click(screen.getByRole('button', { name: /auto-fill title/i }));
+      const title = screen.getByPlaceholderText('Enter bookmark title…') as HTMLInputElement;
+      await waitFor(() => expect(title.value).toBe('Fetched Title'));
+    });
+
+    it('on null title: shows info toast, field unchanged', async () => {
+      vi.mocked(fetchBookmarkTitle).mockResolvedValueOnce(null);
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      const title = screen.getByPlaceholderText('Enter bookmark title…') as HTMLInputElement;
+      fireEvent.change(title, { target: { value: 'kept' } });
+      fireEvent.click(screen.getByRole('button', { name: /auto-fill title/i }));
+      await waitFor(() => expect(toast.info).toHaveBeenCalled());
+      expect(title.value).toBe('kept');
+    });
+
+    it('on TitleFetchError(non-aborted): shows error toast, field unchanged', async () => {
+      vi.mocked(fetchBookmarkTitle).mockRejectedValueOnce(new TitleFetchError('upstream'));
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      const title = screen.getByPlaceholderText('Enter bookmark title…') as HTMLInputElement;
+      fireEvent.change(title, { target: { value: 'kept' } });
+      fireEvent.click(screen.getByRole('button', { name: /auto-fill title/i }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(title.value).toBe('kept');
+    });
+
+    it('on aborted: no toast (intentional cancel)', async () => {
+      vi.mocked(fetchBookmarkTitle).mockRejectedValueOnce(new TitleFetchError('aborted'));
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      fireEvent.click(screen.getByRole('button', { name: /auto-fill title/i }));
+      await new Promise(r => setTimeout(r, 20));
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(toast.info).not.toHaveBeenCalled();
+    });
+
+    it('graceful degradation: modal still saves when fetchBookmarkTitle keeps failing', async () => {
+      vi.mocked(fetchBookmarkTitle).mockRejectedValue(new TitleFetchError('service-down'));
+      const onSave = vi.fn();
+      const onClose = vi.fn();
+      renderAdd({ onSave, onClose });
+      fireEvent.change(screen.getByPlaceholderText('Enter bookmark title…'), {
+        target: { value: 'Manual Title' },
+      });
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      fireEvent.click(screen.getByRole('button', { name: /auto-fill title/i }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+      await waitFor(() => expect(onSave).toHaveBeenCalled());
+      expect(createBookmark).toHaveBeenCalled();
+    });
   });
 });
