@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { verifyJwt } from '../jwt.js';
+import { verifyJwt, EmailNotVerifiedError } from '../jwt.js';
 import { rateLimitFor } from '../rateLimit.js';
 import {
   fetchHead,
@@ -80,7 +80,16 @@ export function titleRoute(deps: RouteDeps = {}): FastifyPluginAsync {
         let sub: string;
         try {
           ({ sub } = await verifyJwt(req.headers.authorization));
-        } catch {
+        } catch (err) {
+          // Email-verified gate failure (claim present + signed but not
+          // strictly true) → 403, distinct from the 401 unauthorized path.
+          // Body is intentionally byte-identical for every caller — it
+          // depends only on the caller's own claim, never on server-side
+          // state, so it cannot be used to enumerate accounts.
+          if (err instanceof EmailNotVerifiedError) {
+            requestsTotal.labels('email-not-verified').inc();
+            return reply.status(403).send({ error: 'Email not verified' });
+          }
           requestsTotal.labels('unauthorized').inc();
           return reply.status(401).send({ error: 'Unauthorized' });
         }

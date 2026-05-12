@@ -32,13 +32,17 @@ const secretKey = createSecretKey(Buffer.from(SECRET, 'utf-8'));
 const VALID_SUB = '00000000-0000-4000-8000-000000000001';
 
 async function makeToken(overrides: Record<string, unknown> = {}): Promise<string> {
-  const base = {
+  const base: Record<string, unknown> = {
     sub: VALID_SUB,
     role: 'app_user',
     aud: ['email-svc', 'metadata-svc'],
+    email_verified: true,
     exp: Math.floor(Date.now() / 1000) + 3600,
     ...overrides,
   };
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === undefined) delete base[k];
+  }
   return new SignJWT(base).setProtectedHeader({ alg: 'HS256' }).sign(secretKey);
 }
 
@@ -128,6 +132,45 @@ describe('POST /title — auth', () => {
       payload: { url: 'https://x.example/' },
     });
     expect(res.statusCode).toBe(401);
+  });
+
+  it('401 when the email_verified claim is missing (required by jose)', async () => {
+    const token = await makeToken({ email_verified: undefined });
+    const res = await app.inject({
+      method: 'POST', url: '/title',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { url: 'https://x.example/' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('403 with body {error:"Email not verified"} when email_verified is strictly false', async () => {
+    const token = await makeToken({ email_verified: false });
+    const res = await app.inject({
+      method: 'POST', url: '/title',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { url: 'https://x.example/' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'Email not verified' });
+  });
+
+  it('403 body is byte-identical across different sub values (no enumeration via response)', async () => {
+    const tokenA = await makeToken({ sub: '00000000-0000-4000-8000-00000000000A', email_verified: false });
+    const tokenB = await makeToken({ sub: '00000000-0000-4000-8000-00000000000B', email_verified: false });
+    const resA = await app.inject({
+      method: 'POST', url: '/title',
+      headers: { authorization: `Bearer ${tokenA}` },
+      payload: { url: 'https://x.example/' },
+    });
+    const resB = await app.inject({
+      method: 'POST', url: '/title',
+      headers: { authorization: `Bearer ${tokenB}` },
+      payload: { url: 'https://x.example/' },
+    });
+    expect(resA.statusCode).toBe(403);
+    expect(resB.statusCode).toBe(403);
+    expect(resA.body).toBe(resB.body);
   });
 });
 

@@ -40,6 +40,7 @@ const secretKey = createSecretKey(Buffer.from(SECRET, 'utf-8'));
 async function makeToken(sub = '00000000-0000-4000-8000-000000000001'): Promise<string> {
   return new SignJWT({
     sub, role: 'app_user', aud: ['email-svc', 'metadata-svc'],
+    email_verified: true,
     exp: Math.floor(Date.now() / 1000) + 3600,
   }).setProtectedHeader({ alg: 'HS256' }).sign(secretKey);
 }

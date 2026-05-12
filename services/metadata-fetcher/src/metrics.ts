@@ -26,6 +26,7 @@ export const OUTCOMES = [
   'rate-limited',
   'concurrency-limited',
   'unauthorized',
+  'email-not-verified',
 ] as const;
 
 export type Outcome = typeof OUTCOMES[number];
@@ -73,3 +74,20 @@ export const bodyTerminationTotal = new Counter({
   registers: [registry],
 });
 for (const r of BODY_TERMINATION_REASONS) bodyTerminationTotal.labels(r).inc(0);
+
+// JWT email_verified claim state canary. Distinguishes "gate working as
+// designed" (a healthy mix of true → ok and false → email-not-verified)
+// from "gate misconfigured at the signer" (sudden 100% false). The
+// 'missing' state is structurally unreachable because the verifier
+// declares email_verified in requiredClaims, so a missing claim fails
+// jose verification and falls into the 'unauthorized' OUTCOMES bucket
+// before this counter is touched. Label set is exactly 'true' | 'false'.
+export const JWT_EMAIL_VERIFIED_STATES = ['true', 'false'] as const;
+export type JwtEmailVerifiedState = typeof JWT_EMAIL_VERIFIED_STATES[number];
+export const jwtEmailVerifiedTotal = new Counter({
+  name: 'metadata_fetcher_jwt_email_verified_total',
+  help: 'Distribution of the email_verified claim across verified JWTs reaching the gate',
+  labelNames: ['state'] as const,
+  registers: [registry],
+});
+for (const s of JWT_EMAIL_VERIFIED_STATES) jwtEmailVerifiedTotal.labels(s).inc(0);
