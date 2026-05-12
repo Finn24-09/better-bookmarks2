@@ -257,6 +257,15 @@ export async function fetchHead(url: string, opts: FetchOptions = {}): Promise<F
           signal: abortController.signal,
         });
       } catch (err) {
+        // The dispatch can fail in three classes:
+        //   1. Our own abort fired (timeout) — signal.aborted is true and
+        //      signal.reason carries the FetchTimeoutError we constructed.
+        //   2. AbortError surfaced from undici/native (treat as timeout).
+        //   3. Real network / TLS failure (upstream-error).
+        if (abortController.signal.aborted && abortController.signal.reason instanceof FetchTimeoutError) {
+          throw abortController.signal.reason;
+        }
+        if (err instanceof FetchTimeoutError) throw err;
         if (err instanceof Error && (err as { name?: string }).name === 'AbortError') {
           throw new FetchTimeoutError('timeout');
         }
