@@ -1,7 +1,7 @@
 # Better Bookmarks 2 — Claude Context
 
 ## Project Overview
-A self-hosted React bookmark manager with a dark glassmorphic design, backed by PostgreSQL + PostgREST with client-side AES-256-GCM end-to-end encryption. The server stores only ciphertext and never holds an encryption key. A separate Fastify-based email microservice handles password-reset, email verification, deletion confirmation, and password-change notifications.
+A self-hosted React bookmark manager with a dark glassmorphic design, backed by PostgreSQL + PostgREST with client-side AES-256-GCM end-to-end encryption. The server stores only ciphertext and never holds an encryption key. Two Fastify-based sibling microservices sit alongside PostgREST: an email service handles password-reset, email verification, deletion confirmation, and password-change notifications, and a metadata-fetcher service performs server-side `<title>` extraction for the auto-fill button on the bookmark form (stateless, network-isolated, sees the URL transiently and never persists it).
 
 **Frontend stack:** React 19 + TypeScript + Vite 8 + Tailwind CSS v4 + lucide-react icons
 **Frontend deps:** react-hook-form, react-dnd, next-themes, sonner (toasts), motion (animations), Radix UI components, react-router v7
@@ -10,14 +10,18 @@ A self-hosted React bookmark manager with a dark glassmorphic design, backed by 
 **Email service stack:** Node.js 22 + Fastify 5 + TypeScript + Pino (with secret redaction) + jose (JWT) + nodemailer + pg + zod
 **Email service test stack:** Vitest 4
 
+**Metadata-fetcher stack:** Node.js 22 + Fastify 5 + TypeScript + Pino + jose + zod + htmlparser2 + prom-client. Stateless: no DB role, no cache. Attached to a dedicated `metadata_net` Docker network so SSRF inside the container cannot reach `db` or `postgrest` on L3.
+**Metadata-fetcher test stack:** Vitest 4
+
 **Repo layout:**
 ```
 .
-├── src/                    # React frontend (this is the project root npm package)
-├── services/email/         # Fastify email microservice (separate npm package)
-├── docker/db/              # PostgREST database init SQL + Dockerfile
-├── docker/frontend/        # Nginx reverse proxy + frontend Dockerfile
-└── .github/workflows/      # CI (audit, test, build) for both packages
+├── src/                          # React frontend (this is the project root npm package)
+├── services/email/               # Fastify email microservice (separate npm package)
+├── services/metadata-fetcher/    # Fastify metadata-fetcher microservice (separate npm package)
+├── docker/db/                    # PostgREST database init SQL + Dockerfile
+├── docker/frontend/              # Nginx reverse proxy + frontend Dockerfile
+└── .github/workflows/            # CI (audit, test, build) for all three packages
 ```
 
 ---
@@ -134,8 +138,11 @@ This project is developed test-first. This is a hard rule, not a suggestion.
 npm test            # frontend single run (CI / before committing)
 npm run test:watch  # frontend watch mode
 
-cd services/email && npm test            # email service single run
-cd services/email && npm run test:watch  # email service watch mode
+cd services/email && npm test                       # email service single run
+cd services/email && npm run test:watch             # email service watch mode
+
+cd services/metadata-fetcher && npm test            # metadata-fetcher single run
+cd services/metadata-fetcher && npm run test:watch  # metadata-fetcher watch mode
 ```
 
 **Test file locations — mirror the source tree:**
@@ -242,7 +249,8 @@ Never break these. They are the core of the zero-knowledge architecture.
 - **Password change = key rotation** — changing password requires re-encrypting ALL bookmarks, tags, and thumbnails with the new key before calling the `change_password` RPC. The order matters: re-encrypt data first, then update credentials. The `RecoveryModal` handles the partial-rotation recovery path when the previous attempt was interrupted.
 - **API error sanitization** — only 400/401/409 relay PostgREST messages. All other errors get a generic message. Do not change this without understanding the schema leakage risk.
 - **Email-service log redaction** — `LOG_REDACT_PATHS` (object paths) and `reqSerializer` (URL query strings) together prevent bearer JWTs, session cookies, and reset tokens from reaching stdout. Both must stay in sync.
-- **JWT audience pinning** — both the email service and PostgREST verify the `aud` claim. See `docker/db/init/11_jwt_audience.sql`.
+- **JWT audience pinning** — `api._sign_jwt` mints `aud=["email-svc","metadata-svc"]` (array). The email service verifies `audience: 'email-svc'`, the metadata-fetcher verifies `audience: 'metadata-svc'`; jose 6's set-membership semantics make a single token valid for both. PostgREST does not enforce `PGRST_JWT_AUD` so the extra claim is silently accepted. See `docker/db/init/11_jwt_audience.sql`.
+- **Metadata-fetcher SSRF posture** — `services/metadata-fetcher/` accepts user-supplied URLs and fetches them server-side. The URL is the most sensitive datum flowing through; it is never logged (pino redact + `reqSerializer` + the `errorSanitizer` walking `err.cause` chains) and never persisted. The full layered defence (hostname canonicalisation, IP deny-list incl. cloud-metadata, dial-by-IP DNS pinning, 1 MiB body cap, 5s timeout, content-type allowlist, gzip rejection, redirect re-resolution, HTTPS-downgrade rejection, closed-set outbound headers) lives in `services/metadata-fetcher/src/ssrfGuard.ts` + `fetcher.ts`. The container has no DB role and is on a dedicated egress network with no L3 path to `db` or `postgrest`. The frontend treats auto-fill as non-essential — every failure mode leaves the bookmark form fully usable for manual entry.
 
 ---
 
@@ -273,6 +281,12 @@ The frontend talks to the email service via `/api/email/*`:
 | `POST /api/email/request-delete` | bearer | Sends 15-min token via email |
 | `POST /api/email/confirm-delete` | bearer | Token + password → SECURITY DEFINER cascade delete |
 | `POST /api/email/notify-password-change` | bearer | Fire-and-forget audit email |
+
+The frontend talks to the metadata-fetcher via a single route at `/api/title/`:
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `POST /api/title/` | bearer | `{ url }` → `{ title: string \| null }`. Server-side `<title>` fetch with full SSRF / DoS / log-leakage hardening. Internal `/health` and `/metrics` are blocked from external reach by Nginx wildcard 404 under `/api/title/`. |
 
 Database init is in `docker/db/init/`:
 | File | Purpose |
