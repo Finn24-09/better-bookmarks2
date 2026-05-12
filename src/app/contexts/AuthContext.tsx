@@ -18,6 +18,17 @@ interface AuthContextValue extends AuthState {
   updateKey: (cryptoKey: CryptoKey) => void;
   clearPartialRotation: () => void;
   setEmailVerified: (verified: boolean) => void;
+  /**
+   * Swap the in-memory JWT and flip emailVerified to true atomically.
+   * Called after POST /api/email/refresh-after-verify returns a fresh
+   * post-verify JWT (see src/lib/email.ts:refreshAfterVerify and
+   * docker/db/init/12_post_verify_jwt.sql for the full flow).
+   *
+   * Deliberately does NOT touch cryptoKey — the key is derived from
+   * password + email and verification never changes either, so re-deriving
+   * here would force a re-login and defeat the UX win of this whole flow.
+   */
+  applyVerifiedToken: (token: string) => void;
   logout: () => void;
 }
 
@@ -70,13 +81,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, emailVerified: verified }));
   };
 
+  const applyVerifiedToken = (token: string) => {
+    setAuthToken(token);
+    setState((s) => ({ ...s, token, emailVerified: true }));
+  };
+
   const logout = () => {
     setAuthToken(null);
     setState({ token: null, userId: null, email: null, cryptoKey: null, partialRotation: null, emailVerified: false });
   };
 
   return (
-    <AuthContext.Provider value={{ ...state, isLoading: false, login, updateKey, clearPartialRotation, setEmailVerified, logout }}>
+    <AuthContext.Provider value={{ ...state, isLoading: false, login, updateKey, clearPartialRotation, setEmailVerified, applyVerifiedToken, logout }}>
       {children}
     </AuthContext.Provider>
   );

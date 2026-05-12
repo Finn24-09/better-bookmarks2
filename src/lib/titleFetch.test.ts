@@ -55,6 +55,7 @@ describe('fetchBookmarkTitle — success', () => {
 describe('fetchBookmarkTitle — error mapping', () => {
   const cases: Array<[number, TitleFetchError['kind']]> = [
     [401, 'auth'],
+    [403, 'unverified'],
     [422, 'blocked'],
     [429, 'rate-limited'],
     [502, 'upstream'],

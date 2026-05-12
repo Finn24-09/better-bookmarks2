@@ -7,10 +7,16 @@ import type { Tag } from '../../lib/tags';
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
+// emailVerified is mutable so individual tests can drive the gate without
+// re-mocking the module. Default is `true` so existing auto-fill tests
+// continue to exercise the happy path.
+const authState = vi.hoisted(() => ({ emailVerified: true }));
+
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
     cryptoKey: {} as CryptoKey,
     userId: 'user-1',
+    emailVerified: authState.emailVerified,
   }),
 }));
 
@@ -89,6 +95,9 @@ describe('BookmarkFormModal', () => {
     vi.clearAllMocks();
     vi.mocked(setBookmarkTags).mockResolvedValue(undefined as never);
     vi.mocked(deleteThumbnailImage).mockResolvedValue(undefined as never);
+    // Default each test back to "verified". Tests that want the gate active
+    // override authState.emailVerified explicitly before rendering.
+    authState.emailVerified = true;
   });
 
   function renderAdd(props: { onSave?: () => void; onClose?: () => void } = {}) {
@@ -542,6 +551,37 @@ describe('BookmarkFormModal', () => {
       fireEvent.click(screen.getByRole('button', { name: /auto-fill title/i }));
       await waitFor(() => expect(toast.error).toHaveBeenCalled());
       expect(title.value).toBe('kept');
+    });
+
+    it('disabled when emailVerified is false (frontend mirror of the server-side claim gate)', async () => {
+      authState.emailVerified = false;
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      const btn = await screen.findByRole('button', { name: /auto-fill title/i });
+      expect(btn).toBeDisabled();
+    });
+
+    it('does NOT call fetchBookmarkTitle on click when emailVerified is false', async () => {
+      authState.emailVerified = false;
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      const btn = await screen.findByRole('button', { name: /auto-fill title/i });
+      fireEvent.click(btn);
+      // Even though the click landed, the disabled state must prevent the
+      // server call from being made.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(fetchBookmarkTitle).not.toHaveBeenCalled();
+    });
+
+    it('enabled when emailVerified flips back to true', async () => {
+      authState.emailVerified = true;
+      renderAdd();
+      const url = screen.getAllByPlaceholderText('https://…')[0];
+      fireEvent.change(url, { target: { value: 'https://example.com' } });
+      const btn = await screen.findByRole('button', { name: /auto-fill title/i });
+      expect(btn).not.toBeDisabled();
     });
 
     it('on aborted: no toast (intentional cancel)', async () => {

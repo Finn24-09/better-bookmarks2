@@ -48,7 +48,7 @@ export function BookmarkFormModal({
   availableTags,
   onSave,
 }: BookmarkFormModalProps) {
-  const { cryptoKey, userId } = useAuth();
+  const { cryptoKey, userId, emailVerified } = useAuth();
   const isEditing = !!initialData;
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(initialData?.tagIds ?? []);
   const [localTags, setLocalTags] = useState<Tag[]>(availableTags);
@@ -344,7 +344,19 @@ export function BookmarkFormModal({
                     <button
                       type="button"
                       onClick={handleAutoFillTitle}
-                      disabled={isSubmitting}
+                      // Mirrors the metadata-fetcher server-side gate: the
+                      // service rejects POST /title with 403 if the JWT does
+                      // not carry email_verified=true. Disabling here is UX
+                      // only — the server is authoritative — but it stops
+                      // unverified users from hitting an error toast they
+                      // can't fix without first using the verification
+                      // banner.
+                      disabled={isSubmitting || !emailVerified}
+                      title={
+                        !emailVerified
+                          ? "Verify your email to enable auto-fill"
+                          : undefined
+                      }
                       aria-label={
                         autoTitlePhase === "loading"
                           ? "Cancel auto-fill"

@@ -3,6 +3,7 @@ import { getToken } from './api';
 /** Typed error union for the auto-fill flow. */
 export type TitleFetchErrorKind =
   | 'auth'             // 401 — JWT missing / invalid / wrong audience
+  | 'unverified'       // 403 — JWT signed but email_verified claim is not strictly true
   | 'blocked'          // 422 — target rejected by the service (SSRF / content-type / size / redirect)
   | 'timeout'          // 504 — upstream fetch exceeded the service timeout
   | 'upstream'         // 502 — generic upstream failure (DNS / TLS / refused)
@@ -23,6 +24,7 @@ const ENDPOINT = '/api/title/';
 function mapStatus(status: number): TitleFetchErrorKind {
   switch (status) {
     case 401: return 'auth';
+    case 403: return 'unverified';
     case 422: return 'blocked';
     case 429: return 'rate-limited';
     case 502: return 'upstream';

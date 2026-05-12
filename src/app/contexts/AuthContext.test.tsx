@@ -284,6 +284,63 @@ describe('AuthContext', () => {
   });
 
   // -------------------------------------------------------------------------
+  // applyVerifiedToken — single primitive used after a successful
+  // POST /api/email/refresh-after-verify lands a fresh JWT carrying the
+  // email_verified=true claim. Must swap the in-memory token + flip the
+  // emailVerified flag atomically; must NOT touch the crypto key (the key
+  // is derived from password + email and is unchanged by verification —
+  // touching it would force a re-login and defeat the UX win).
+  // -------------------------------------------------------------------------
+  it('applyVerifiedToken() swaps the in-memory token and sets emailVerified=true', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await act(async () => {
+      await result.current.login('old-jwt', 'user-1', 'test@example.com', key, false);
+    });
+    expect(result.current.token).toBe('old-jwt');
+    expect(result.current.emailVerified).toBe(false);
+
+    act(() => { result.current.applyVerifiedToken('new-jwt'); });
+
+    await waitFor(() => {
+      expect(result.current.token).toBe('new-jwt');
+      expect(result.current.emailVerified).toBe(true);
+    });
+  });
+
+  it('applyVerifiedToken() does NOT mutate the crypto key (verifying email never re-derives the key)', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await act(async () => {
+      await result.current.login('old-jwt', 'user-1', 'test@example.com', key, false);
+    });
+    const keyBefore = result.current.cryptoKey;
+
+    act(() => { result.current.applyVerifiedToken('new-jwt'); });
+
+    await waitFor(() => expect(result.current.token).toBe('new-jwt'));
+    // Same reference — the context did not derive or replace the key.
+    expect(result.current.cryptoKey).toBe(keyBefore);
+  });
+
+  it('applyVerifiedToken() leaves userId and email unchanged', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const key = await deriveKey('password123', 'test@example.com');
+
+    await act(async () => {
+      await result.current.login('old-jwt', 'user-1', 'test@example.com', key, false);
+    });
+
+    act(() => { result.current.applyVerifiedToken('new-jwt'); });
+
+    await waitFor(() => expect(result.current.token).toBe('new-jwt'));
+    expect(result.current.userId).toBe('user-1');
+    expect(result.current.email).toBe('test@example.com');
+  });
+
+  // -------------------------------------------------------------------------
   // resendVerificationEmail trigger — only fires for fresh sign-ups whose
   // email is not yet verified. Existing logged-in users must NOT re-trigger
   // the cooldown-protected resend on every page load.

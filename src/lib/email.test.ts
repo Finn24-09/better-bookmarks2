@@ -18,6 +18,7 @@ const {
   requestAccountDeletion,
   confirmAccountDeletion,
   notifyPasswordChanged,
+  refreshAfterVerify,
 } = await import('./email');
 
 describe('requestPasswordReset', () => {
@@ -102,5 +103,61 @@ describe('notifyPasswordChanged', () => {
   it('resolves even on non-ok response', async () => {
     fetchMock.mockResolvedValueOnce(new Response('{}', { status: 500 }));
     await expect(notifyPasswordChanged()).resolves.toBeUndefined();
+  });
+});
+
+describe('refreshAfterVerify', () => {
+  it('POSTs to /api/email/refresh-after-verify with Authorization header', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ token: 'new.jwt.value', email_verified: true }), { status: 200 }),
+    );
+    await refreshAfterVerify();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/email/refresh-after-verify',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer mock-jwt-token' }),
+      }),
+    );
+  });
+
+  it('returns the parsed { token, email_verified } body on 200', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ token: 'new.jwt.value', email_verified: true }), { status: 200 }),
+    );
+    const result = await refreshAfterVerify();
+    expect(result).toEqual({ token: 'new.jwt.value', email_verified: true });
+  });
+
+  it('returns null on 410 Gone (verification window expired) — falls back to next-sign-in refresh', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 410 }));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+  });
+
+  it('returns null on 404 (route not yet deployed — backwards-compat with rolling deploys)', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 404 }));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+  });
+
+  it('returns null on network failure (does NOT throw — verify itself already succeeded)', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('network failure'));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the response body is malformed JSON', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('not-json', { status: 200 }));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the response is missing a token', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ email_verified: true }), { status: 200 }),
+    );
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
   });
 });
