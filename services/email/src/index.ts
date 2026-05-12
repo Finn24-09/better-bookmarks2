@@ -13,6 +13,7 @@ import { resendVerificationRoute } from './routes/resendVerification.js';
 import { requestDeleteRoute } from './routes/requestDelete.js';
 import { confirmDeleteRoute } from './routes/confirmDelete.js';
 import { notifyPasswordChangeRoute } from './routes/notifyPasswordChange.js';
+import { refreshAfterVerifyRoute } from './routes/refreshAfterVerify.js';
 import { LOG_REDACT_PATHS } from './logRedact.js';
 import { reqSerializer } from './logSerializers.js';
 
@@ -110,6 +111,7 @@ await fastify.register(resendVerificationRoute);
 await fastify.register(requestDeleteRoute);
 await fastify.register(confirmDeleteRoute);
 await fastify.register(notifyPasswordChangeRoute);
+await fastify.register(refreshAfterVerifyRoute);
 
 // Periodic cleanup of expired/used tokens (runs every 15 minutes).
 //

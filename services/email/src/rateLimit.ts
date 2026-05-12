@@ -18,6 +18,7 @@ import type { RateLimitOptions, RateLimitPluginOptions } from '@fastify/rate-lim
 //   - /resend-verification:    10 req / user / 5 min (mail-bomb primitive)
 //   - /request-delete:         10 req / user / 5 min
 //   - /notify-password-change: 10 req / user / 5 min
+//   - /refresh-after-verify:    3 req / user / 60s   (one-shot per verify event)
 //   - /health:                  60 req / IP  / 60s   (generous, but bounded)
 
 /**
@@ -64,6 +65,7 @@ const routes: Record<string, RateLimitOptions> = {
   '/resend-verification':     { max: 10, timeWindow: 5 * 60_000, keyGenerator: userOrIpKey },
   '/request-delete':          { max: 10, timeWindow: 5 * 60_000, keyGenerator: userOrIpKey },
   '/notify-password-change':  { max: 10, timeWindow: 5 * 60_000, keyGenerator: userOrIpKey },
+  '/refresh-after-verify':    { max: 3,  timeWindow: 60_000,     keyGenerator: userOrIpKey },
   '/health':                  { max: 60, timeWindow: 60_000 },
 };
 
