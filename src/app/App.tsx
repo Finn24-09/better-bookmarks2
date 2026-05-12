@@ -33,6 +33,13 @@ function useHashFragmentHandler() {
   const [deleteToken, setDeleteToken] = useState<string | null>(null);
 
   useEffect(() => {
+    // Guard against a late refreshAfterVerify resolution writing the
+    // post-verify JWT back into auth state after the user has logged out
+    // (router unmounts the home route → effect cleanup runs → cancelled=true).
+    // Without this, an in-flight refresh could partially resurrect a
+    // logged-out session.
+    let cancelled = false;
+
     const hash = window.location.hash;
     if (!hash) return;
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -52,7 +59,8 @@ function useHashFragmentHandler() {
         // 5-minute window may have lapsed) — verification itself already
         // succeeded; the user falls back to next-sign-in refresh.
         refreshAfterVerify().then((result) => {
-          if (result) applyVerifiedToken(result.token);
+          if (cancelled || !result) return;
+          applyVerifiedToken(result.token);
         });
       } else {
         toast.error('Email verification failed. The link may have expired.');
@@ -62,6 +70,8 @@ function useHashFragmentHandler() {
       const token = params.get('token');
       if (token) setDeleteToken(token);
     }
+
+    return () => { cancelled = true; };
   }, [setEmailVerified, applyVerifiedToken]);
 
   return { deleteToken, clearDeleteToken: () => setDeleteToken(null) };

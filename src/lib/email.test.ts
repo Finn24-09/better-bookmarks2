@@ -109,7 +109,7 @@ describe('notifyPasswordChanged', () => {
 describe('refreshAfterVerify', () => {
   it('POSTs to /api/email/refresh-after-verify with Authorization header', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ token: 'new.jwt.value', email_verified: true }), { status: 200 }),
+      new Response(JSON.stringify({ token: 'new.jwt.value' }), { status: 200 }),
     );
     await refreshAfterVerify();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -121,12 +121,12 @@ describe('refreshAfterVerify', () => {
     );
   });
 
-  it('returns the parsed { token, email_verified } body on 200', async () => {
+  it('returns { token } on 200', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ token: 'new.jwt.value', email_verified: true }), { status: 200 }),
+      new Response(JSON.stringify({ token: 'new.jwt.value' }), { status: 200 }),
     );
     const result = await refreshAfterVerify();
-    expect(result).toEqual({ token: 'new.jwt.value', email_verified: true });
+    expect(result).toEqual({ token: 'new.jwt.value' });
   });
 
   it('returns null on 410 Gone (verification window expired) — falls back to next-sign-in refresh', async () => {
@@ -147,17 +147,35 @@ describe('refreshAfterVerify', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null when the response body is malformed JSON', async () => {
+  it('returns null when the response body is malformed JSON (and leaves a console.warn breadcrumb)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     fetchMock.mockResolvedValueOnce(new Response('not-json', { status: 200 }));
     const result = await refreshAfterVerify();
     expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 
-  it('returns null when the response is missing a token', async () => {
+  it('returns null when the response is missing a token (and leaves a console.warn breadcrumb)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ email_verified: true }), { status: 200 }),
+      new Response(JSON.stringify({ unrelated: 'field' }), { status: 200 }),
     );
     const result = await refreshAfterVerify();
     expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('does NOT log a breadcrumb for legitimate failures (404 / 410 / network) — those are expected paths', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 410 }));
+    expect(await refreshAfterVerify()).toBeNull();
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 404 }));
+    expect(await refreshAfterVerify()).toBeNull();
+    fetchMock.mockRejectedValueOnce(new TypeError('network failure'));
+    expect(await refreshAfterVerify()).toBeNull();
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });

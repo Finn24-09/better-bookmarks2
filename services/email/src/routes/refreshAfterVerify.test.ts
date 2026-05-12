@@ -54,10 +54,10 @@ describe('POST /refresh-after-verify', () => {
     mockConnect.mockResolvedValue({ query: mockQuery, release: mockRelease });
   });
 
-  it('returns 200 with token + email_verified:true on a successful mint', async () => {
+  it('returns 200 with just { token } on a successful mint (email_verified is implied by the precondition)', async () => {
     mockPoolQuery.mockResolvedValueOnce({
       rowCount: 1,
-      rows: [{ token: 'new.jwt.value', email_verified: true }],
+      rows: [{ token: 'new.jwt.value' }],
     });
     const res = await makeApp().inject({
       method: 'POST',
@@ -66,7 +66,7 @@ describe('POST /refresh-after-verify', () => {
       body: '{}',
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ token: 'new.jwt.value', email_verified: true });
+    expect(res.json()).toEqual({ token: 'new.jwt.value' });
     expect(mockPoolQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockPoolQuery.mock.calls[0];
     expect(String(sql)).toMatch(/auth\.mint_post_verify_jwt\s*\(\s*\$1\s*\)/i);
@@ -143,7 +143,7 @@ describe('POST /refresh-after-verify', () => {
     // claim-false token must reach the route handler successfully.
     mockPoolQuery.mockResolvedValueOnce({
       rowCount: 1,
-      rows: [{ token: 'new.jwt.value', email_verified: true }],
+      rows: [{ token: 'new.jwt.value' }],
     });
     const res = await makeApp().inject({
       method: 'POST',
@@ -166,7 +166,7 @@ describe('POST /refresh-after-verify', () => {
 
     mockPoolQuery.mockResolvedValue({
       rowCount: 1,
-      rows: [{ token: 'new.jwt.value', email_verified: true }],
+      rows: [{ token: 'new.jwt.value' }],
     });
     const app = makeApp();
     // Exhaust user A's bucket

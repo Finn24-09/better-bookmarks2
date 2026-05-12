@@ -65,8 +65,14 @@ export async function notifyPasswordChanged(): Promise<void> {
  * to the next-sign-in claim refresh path, which is the same behaviour they
  * would have if this route did not exist. The caller silently no-ops on
  * null; we never surface an error toast for this case.
+ *
+ * A 200 response with an unexpected body shape leaves a console.warn
+ * breadcrumb (no PII, no token) so a future server-side regression that
+ * emits the wrong shape surfaces in dev tools without being masked by
+ * the silent fallback. The same condition still returns null for the
+ * caller — the breadcrumb is for ops, not UX.
  */
-export async function refreshAfterVerify(): Promise<{ token: string; email_verified: boolean } | null> {
+export async function refreshAfterVerify(): Promise<{ token: string } | null> {
   let res: Response;
   try {
     res = await emailFetch('/refresh-after-verify', {}, true);
@@ -78,10 +84,17 @@ export async function refreshAfterVerify(): Promise<{ token: string; email_verif
   try {
     body = await res.json();
   } catch {
+    console.warn('refreshAfterVerify: 200 with non-JSON body');
     return null;
   }
-  if (!body || typeof body !== 'object') return null;
-  const { token, email_verified } = body as { token?: unknown; email_verified?: unknown };
-  if (typeof token !== 'string' || typeof email_verified !== 'boolean') return null;
-  return { token, email_verified };
+  if (!body || typeof body !== 'object') {
+    console.warn('refreshAfterVerify: 200 with non-object body');
+    return null;
+  }
+  const { token } = body as { token?: unknown };
+  if (typeof token !== 'string') {
+    console.warn('refreshAfterVerify: 200 with missing or non-string token');
+    return null;
+  }
+  return { token };
 }

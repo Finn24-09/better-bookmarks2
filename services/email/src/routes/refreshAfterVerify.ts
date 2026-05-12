@@ -40,8 +40,8 @@ export const refreshAfterVerifyRoute: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const result = await pool.query<{ token: string; email_verified: boolean }>(
-        'SELECT token, email_verified FROM auth.mint_post_verify_jwt($1)',
+      const result = await pool.query<{ token: string }>(
+        'SELECT token FROM auth.mint_post_verify_jwt($1)',
         [userId],
       );
       if (!result.rowCount) {
@@ -50,8 +50,14 @@ export const refreshAfterVerifyRoute: FastifyPluginAsync = async (fastify) => {
         // same 410 the precondition path uses.
         return reply.status(410).send({ error: 'Verification window expired' });
       }
-      const { token, email_verified } = result.rows[0];
-      return reply.status(200).send({ token, email_verified });
+      const { token } = result.rows[0];
+      // The DB function's preconditions (email_verified IS TRUE +
+      // 5-minute window) gate the mint, so a successful return implies the
+      // user is verified. We do NOT echo email_verified in the response
+      // because doing so would create a dead-weight field the frontend
+      // must validate forever; the new JWT itself carries the claim and
+      // is the authoritative signal.
+      return reply.status(200).send({ token });
     } catch (err: unknown) {
       // 23514 = check_violation (raised by the DB function for unverified
       // user or stale verification window). P0002 = no_data_found (user
