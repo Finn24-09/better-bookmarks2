@@ -224,7 +224,8 @@ services/email/src/
 │   ├── resendVerification.ts # POST /resend-verification — auth required
 │   ├── requestDelete.ts      # POST /request-delete — auth required, sends confirmation email
 │   ├── confirmDelete.ts      # POST /confirm-delete — token + password, SECURITY DEFINER cascade
-│   └── notifyPasswordChange.ts # POST /notify-password-change — fire-and-forget audit email
+│   ├── notifyPasswordChange.ts # POST /notify-password-change — fire-and-forget audit email
+│   └── refreshAfterVerify.ts # POST /refresh-after-verify — mints fresh JWT via auth.mint_post_verify_jwt (5-min window)
 └── templates/
     ├── _shared.ts            # Common HTML envelope
     ├── escape.ts             # HTML-entity escape for all user-controlled data
@@ -251,6 +252,7 @@ Never break these. They are the core of the zero-knowledge architecture.
 - **Email-service log redaction** — `LOG_REDACT_PATHS` (object paths) and `reqSerializer` (URL query strings) together prevent bearer JWTs, session cookies, and reset tokens from reaching stdout. Both must stay in sync.
 - **JWT audience pinning** — `api._sign_jwt` mints `aud=["email-svc","metadata-svc"]` (array). The email service verifies `audience: 'email-svc'`, the metadata-fetcher verifies `audience: 'metadata-svc'`; jose 6's set-membership semantics make a single token valid for both. PostgREST does not enforce `PGRST_JWT_AUD` so the extra claim is silently accepted. See `docker/db/init/11_jwt_audience.sql`.
 - **Metadata-fetcher SSRF posture** — `services/metadata-fetcher/` accepts user-supplied URLs and fetches them server-side. The URL is the most sensitive datum flowing through; it is never logged (pino redact + `reqSerializer` + the `errorSanitizer` walking `err.cause` chains) and never persisted. The full layered defence (hostname canonicalisation, IP deny-list incl. cloud-metadata, dial-by-IP DNS pinning, 1 MiB body cap, 5s timeout, content-type allowlist, gzip rejection, redirect re-resolution, HTTPS-downgrade rejection, closed-set outbound headers) lives in `services/metadata-fetcher/src/ssrfGuard.ts` + `fetcher.ts`. The container has no DB role and is on a dedicated egress network with no L3 path to `db` or `postgrest`. The frontend treats auto-fill as non-essential — every failure mode leaves the bookmark form fully usable for manual entry.
+- **Metadata-fetcher email-verified gate** — `services/metadata-fetcher/src/jwt.ts` requires `email_verified === true` in the JWT (strict equality, not truthy) before serving `POST /title`. This is the documented carve-out from the "enforce against DB, never claim" invariant in `08_email_tokens.sql:505-510`: the fetcher has no DB role and cannot read `auth.users` from `metadata_net`. The staleness gap on a fresh `false → true` transition is closed by `POST /api/email/refresh-after-verify`, which mints a fresh JWT via `auth.mint_post_verify_jwt` (5-minute DB-side window — NOT a general refresh primitive). Adding a DB lookup here would regress the network-isolation cap; do not propose it. See `docker/db/init/12_post_verify_jwt.sql` for the full rationale.
 
 ---
 
@@ -281,12 +283,13 @@ The frontend talks to the email service via `/api/email/*`:
 | `POST /api/email/request-delete` | bearer | Sends 15-min token via email |
 | `POST /api/email/confirm-delete` | bearer | Token + password → SECURITY DEFINER cascade delete |
 | `POST /api/email/notify-password-change` | bearer | Fire-and-forget audit email |
+| `POST /api/email/refresh-after-verify` | bearer (any) | Returns `{ token, email_verified: true }` for the user immediately after `mark_email_verified` (5-min DB-side window). The frontend swaps the in-memory JWT so the metadata-fetcher gate accepts the next call without re-sign-in. See `docker/db/init/12_post_verify_jwt.sql`. |
 
 The frontend talks to the metadata-fetcher via a single route at `/api/title/`:
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `POST /api/title/` | bearer | `{ url }` → `{ title: string \| null }`. Server-side `<title>` fetch with full SSRF / DoS / log-leakage hardening. Internal `/health` and `/metrics` are blocked from external reach by Nginx wildcard 404 under `/api/title/`. |
+| `POST /api/title/` | bearer + `email_verified=true` claim | `{ url }` → `{ title: string \| null }`. Server-side `<title>` fetch with full SSRF / DoS / log-leakage hardening. The verified-email gate raises per-mailbox cost on fresh-account abuse: a VPN farm needs a real, deliverable inbox per account before it can drive the only outbound-fetching endpoint. The claim is strictly `=== true`; missing claim → 401, false / coerced shapes → 403. The 403 body is byte-identical across users so it cannot enumerate accounts. The staleness gap on a `false → true` transition is closed by `POST /api/email/refresh-after-verify`. Internal `/health` and `/metrics` are blocked from external reach by Nginx wildcard 404 under `/api/title/`. |
 
 Database init is in `docker/db/init/`:
 | File | Purpose |
