@@ -35,6 +35,14 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/email/, ''),
       },
+      // Metadata-fetcher service — exact-match route, must precede /api below.
+      // In dev, exposed on port 5002 via docker-compose.override.yml.
+      // The route strips `/api/title` so the service receives plain `/title`.
+      '/api/title': {
+        target: 'http://localhost:5002',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/title/, '/title'),
+      },
       // Proxy /api/* → PostgREST at :3000 (strips the /api prefix)
       '/api': {
         target: 'http://localhost:3000',
