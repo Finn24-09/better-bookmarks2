@@ -220,7 +220,7 @@ export async function validateUrl(
     host: rawHost,
     port,
     dialIp: dial.address,
-    dialFamily: dial.family,
+    dialFamily: dial.family === 6 ? 6 : 4,
     pathQuery: url.pathname + url.search,
   };
 }
