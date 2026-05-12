@@ -40,6 +40,12 @@ describe('metadata-fetcher server', () => {
     expect(res.body).toMatch(/nodejs_/);
   });
 
+  it('unknown route returns 404 with a generic body (no stack / no internal detail)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/does-not-exist' });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'Not found' });
+  });
+
   it('rejects a body larger than the 4 KiB bodyLimit with 413', async () => {
     const big = 'x'.repeat(5 * 1024); // 5 KiB, exceeds the 4 KiB cap
     const res = await app.inject({

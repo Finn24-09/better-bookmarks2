@@ -85,6 +85,10 @@ async function buildTestApp(
     },
     trustProxy: 1,
     bodyLimit: 4 * 1024,
+    // Mirror the production buildServer() config so the trailing-slash
+    // regression test exercises the same routing behaviour as a deployed
+    // container.
+    routerOptions: { ignoreTrailingSlash: true },
   });
   await app.register(rateLimit, rateLimitConfig.global);
   await app.register(titleRoute(routeDeps));
@@ -198,6 +202,30 @@ describe('POST /title — fetcher integration', () => {
     const res = await exercise({ resolver: publicResolver, dispatch });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ title: 'Example Page' });
+  });
+
+  // Regression: the Vite dev proxy rewrite preserved the trailing slash on
+  // /api/title/, so the service received `POST /title/`. Fastify's default
+  // ignoreTrailingSlash:false treated this as a different route from /title,
+  // returning 404 and surfacing as "Couldn't fetch title" in the UI with no
+  // useful log line. The fix sets ignoreTrailingSlash:true in index.ts;
+  // this test wires the modal-facing test app the same way and asserts both
+  // forms route to the same handler.
+  it('200 on POST /title/ (trailing slash) — regression for dev-proxy bug', async () => {
+    const { dispatch } = makeDispatch({ body: '<title>Trailing Slash OK</title>' });
+    const app = await buildTestApp({ resolver: publicResolver, dispatch });
+    try {
+      const token = await makeToken();
+      const res = await app.inject({
+        method: 'POST', url: '/title/',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        payload: { url: 'https://example.com/' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ title: 'Trailing Slash OK' });
+    } finally {
+      await app.close();
+    }
   });
 
   it('200 with { title: null } when extractor returns null', async () => {
@@ -353,6 +381,8 @@ describe('POST /title — log sanitisation canary', () => {
       },
       trustProxy: 1,
       bodyLimit: 4 * 1024,
+      // Mirror the production buildServer() config — see buildTestApp comment.
+      routerOptions: { ignoreTrailingSlash: true },
     });
     await app.register(rateLimit, rateLimitConfig.global);
     await app.register(titleRoute({ resolver: publicResolver, dispatch }));

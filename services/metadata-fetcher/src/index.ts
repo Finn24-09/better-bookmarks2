@@ -31,6 +31,17 @@ export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
     // URL length ≤ 2000; 4 KiB is two orders of magnitude above ceiling and
     // matches Nginx's per-location client_max_body_size 4k.
     bodyLimit: 4 * 1024,
+    // Production Nginx's `proxy_pass http://upstream/title;` strips trailing
+    // slashes via location-prefix replacement, but the Vite dev proxy's
+    // rewrite preserves them — so `/api/title/` reaches this service as
+    // `/title/`. With Fastify's default ignoreTrailingSlash:false, `/title`
+    // and `/title/` are distinct routes and only the former is registered,
+    // 404'ing the dev path. Accepting both forms here is the simpler fix
+    // and keeps the service tolerant if any future routing layer drifts.
+    // (Fastify v6 will require this under routerOptions; v5 still accepts
+    // both shapes but emits a deprecation warning at top level — use the
+    // forward-compatible nested form.)
+    routerOptions: { ignoreTrailingSlash: true },
   });
 
   // Visible startup banner — operators reading `docker compose logs
@@ -56,6 +67,16 @@ export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
       return reply.status(500).send({ error: 'Internal error' });
     }
     return reply.status(status).send({ error: 'Invalid request' });
+  });
+
+  // 404 handler — log at warn so a routing-layer regression (e.g. a future
+  // Vite-proxy rewrite drift or a missing Fastify alias) surfaces in
+  // `docker compose logs` instead of looking like a silent UI failure.
+  // reqSerializer scrubs query strings, so no token leak; url here is the
+  // path only, which is exactly what an operator needs to triage.
+  fastify.setNotFoundHandler((req, reply) => {
+    fastify.log.warn({ method: req.method, url: req.url }, 'route not found');
+    return reply.status(404).send({ error: 'Not found' });
   });
 
   fastify.get(

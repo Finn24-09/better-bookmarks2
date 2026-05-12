@@ -135,6 +135,7 @@ async function buildApp(dispatch: DispatchFn, resolver: (host: string) => Promis
     },
     trustProxy: 1,
     bodyLimit: 4 * 1024,
+    routerOptions: { ignoreTrailingSlash: true },
   });
   await app.register(rateLimit, rateLimitConfig.global);
   await app.register(titleRoute({ dispatch, resolver, timeoutMs: 500, globalCap: 32, perUserCap: 3 }));

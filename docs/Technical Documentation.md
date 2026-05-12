@@ -484,6 +484,26 @@ The target URL, the hostname, and any resolved IP are treated as sensitive PII f
 
 `src/lib/titleFetch.ts` is the client. It mirrors `src/lib/email.ts`'s shape (does NOT use `apiFetch`, which is PostgREST-specific). Every non-200 maps to a stable `TitleFetchError` kind; the UI surfaces a generic toast and leaves the title field unchanged. The auto-fill feature is non-essential — the bookmark form remains fully usable when the service is unreachable, slow, or returning errors (covered by an explicit graceful-degradation test).
 
+### Troubleshooting
+
+The auto-fill button shows "Couldn't fetch title. Please enter it manually." on every URL with no useful container log line. Two distinct causes produce this exact symptom:
+
+1. **JWT audience mismatch on an existing DB volume.** The multi-audience SQL migration in `docker/db/init/11_jwt_audience.sql` runs only on fresh DB volumes (`/docker-entrypoint-initdb.d/` semantics). If your dev DB volume predates this feature, freshly-minted tokens still carry `aud="email-svc"` (single string) which the metadata-fetcher rejects against its `audience: 'metadata-svc'` check, returning 401. Apply the migration once against the running container:
+   ```
+   docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+     -f /docker-entrypoint-initdb.d/11_jwt_audience.sql
+   ```
+   Then sign out + sign in to mint a fresh token with the array audience.
+
+2. **Stale route 404 from a routing-layer drift** (closed in the source by `routerOptions.ignoreTrailingSlash: true` in `services/metadata-fetcher/src/index.ts`). If a future change re-disables that flag or re-introduces a path mismatch between the Vite dev proxy and the service, `POST /title/` would 404 with the same UI symptom. Diagnose by curling the service directly with a valid bearer:
+   ```
+   curl -i -X POST http://localhost:5002/title \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"url":"https://example.com/"}'
+   ```
+   200 → service is healthy; the issue is in front of it (Vite proxy or Nginx). 401 → token shape (cause #1). 404 → routing regression.
+
 ---
 
 ## 7. Authentication (`src/lib/auth.ts` + `AuthContext`)
