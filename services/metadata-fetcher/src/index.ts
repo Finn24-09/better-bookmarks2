@@ -6,6 +6,7 @@ import { LOG_REDACT_PATHS } from './logRedact.js';
 import { reqSerializer } from './logSerializers.js';
 import { registry } from './metrics.js';
 import { VERSION } from './version.js';
+import { titleRoute } from './routes/title.js';
 
 export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
   const fastify = Fastify({
@@ -72,6 +73,12 @@ export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
     reply.header('Content-Type', registry.contentType);
     return reply.send(await registry.metrics());
   });
+
+  // POST /title — the only user-facing route. The plugin installs its own
+  // setErrorHandler that sanitises err.cause chains before pino sees them;
+  // that handler is scoped to the plugin context and overrides the global
+  // one above for any error originating inside the route.
+  await fastify.register(titleRoute());
 
   return fastify;
 }
