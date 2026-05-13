@@ -2,7 +2,6 @@ import http from 'node:http';
 import https from 'node:https';
 import { Readable } from 'node:stream';
 import { validateUrl, type Resolver, type ValidationResult } from './ssrfGuard.js';
-import { VERSION as _version } from './version.js';
 
 // ---------------------------------------------------------------------------
 // Hardened HTTP fetcher
@@ -53,9 +52,6 @@ export interface FetchResult {
 // operators can reach the project before nullrouting the IP. No version,
 // to avoid CVE-pinning targeting.
 export const USER_AGENT = 'better-bookmarks-metadata-fetcher (+https://github.com/finn-marks/better-bookmarks2)';
-// Silence unused-import warning while keeping VERSION exported indirectly via
-// the runtime banner; UA is intentionally versionless.
-void _version;
 
 // Default body cap. The runtime value is sourced from `config.MAX_BODY_BYTES`
 // (env-overridable, see services/metadata-fetcher/src/config.ts), letting
@@ -348,7 +344,7 @@ export async function fetchHead(url: string, opts: FetchOptions = {}): Promise<F
         if (err instanceof Error && (err as { name?: string }).name === 'AbortError') {
           throw new FetchTimeoutError('timeout');
         }
-        throw new FetchUpstreamError('upstream dispatch failed');
+        throw new FetchUpstreamError('upstream dispatch failed', { cause: err });
       }
 
       // Status-code policy.

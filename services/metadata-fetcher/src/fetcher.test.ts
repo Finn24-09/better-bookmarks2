@@ -532,3 +532,21 @@ describe('fetcher — onHop observability', () => {
     expect(hops[1].ip).toBe('1.1.1.1');
   });
 });
+
+describe('FetchUpstreamError cause preservation (Task 8)', () => {
+  it('chains the original dispatch error as `cause` on FetchUpstreamError', async () => {
+    const original = new Error('ECONNREFUSED 1.2.3.4:443');
+    const failingDispatch: DispatchFn = () => Promise.reject(original);
+    let caught: unknown;
+    try {
+      await fetchHead('https://example.com/', {
+        dispatch: failingDispatch,
+        resolver: async () => [{ address: '1.2.3.4', family: 4 } as LookupAddress],
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(FetchUpstreamError);
+    expect((caught as FetchUpstreamError).cause).toBe(original);
+  });
+});
