@@ -26,6 +26,15 @@ function wrapper({ children }: { children: ReactNode }) {
   return <AuthProvider>{children}</AuthProvider>;
 }
 
+// Build a well-formed JWT-shaped string. Signature is irrelevant —
+// applyVerifiedToken does not verify it (server is the only signer); the
+// local sanity check only inspects shape, sub, email_verified, and exp.
+function buildJwt(payload: Record<string, unknown>): string {
+  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/=+$/, '');
+  const body = btoa(JSON.stringify(payload)).replace(/=+$/, '');
+  return `${header}.${body}.signature`;
+}
+
 describe('AuthContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -301,10 +310,11 @@ describe('AuthContext', () => {
     expect(result.current.token).toBe('old-jwt');
     expect(result.current.emailVerified).toBe(false);
 
-    act(() => { result.current.applyVerifiedToken('new-jwt'); });
+    const newJwt = buildJwt({ sub: 'user-1', email_verified: true, exp: Math.floor(Date.now()/1000)+60 });
+    act(() => { result.current.applyVerifiedToken(newJwt); });
 
     await waitFor(() => {
-      expect(result.current.token).toBe('new-jwt');
+      expect(result.current.token).toBe(newJwt);
       expect(result.current.emailVerified).toBe(true);
     });
   });
@@ -318,9 +328,10 @@ describe('AuthContext', () => {
     });
     const keyBefore = result.current.cryptoKey;
 
-    act(() => { result.current.applyVerifiedToken('new-jwt'); });
+    const newJwt = buildJwt({ sub: 'user-1', email_verified: true, exp: Math.floor(Date.now()/1000)+60 });
+    act(() => { result.current.applyVerifiedToken(newJwt); });
 
-    await waitFor(() => expect(result.current.token).toBe('new-jwt'));
+    await waitFor(() => expect(result.current.token).toBe(newJwt));
     // Same reference — the context did not derive or replace the key.
     expect(result.current.cryptoKey).toBe(keyBefore);
   });
@@ -333,9 +344,10 @@ describe('AuthContext', () => {
       await result.current.login('old-jwt', 'user-1', 'test@example.com', key, false);
     });
 
-    act(() => { result.current.applyVerifiedToken('new-jwt'); });
+    const newJwt = buildJwt({ sub: 'user-1', email_verified: true, exp: Math.floor(Date.now()/1000)+60 });
+    act(() => { result.current.applyVerifiedToken(newJwt); });
 
-    await waitFor(() => expect(result.current.token).toBe('new-jwt'));
+    await waitFor(() => expect(result.current.token).toBe(newJwt));
     expect(result.current.userId).toBe('user-1');
     expect(result.current.email).toBe('test@example.com');
   });
@@ -403,5 +415,86 @@ describe('AuthContext', () => {
     ).resolves.not.toThrow();
 
     expect(result.current.token).toBe('jwt-token');
+  });
+});
+
+describe('AuthContext callback stability', () => {
+  it('keeps applyVerifiedToken and setEmailVerified referentially stable across re-renders', () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <AuthProvider>{children}</AuthProvider>
+    );
+    const { result, rerender } = renderHook(() => useAuth(), { wrapper });
+
+    const firstApply = result.current.applyVerifiedToken;
+    const firstSetVerified = result.current.setEmailVerified;
+    const firstUpdateKey = result.current.updateKey;
+    const firstClearPartial = result.current.clearPartialRotation;
+    const firstLogout = result.current.logout;
+
+    // Trigger an unrelated state change to force a re-render.
+    act(() => result.current.setEmailVerified(true));
+    rerender();
+
+    expect(result.current.applyVerifiedToken).toBe(firstApply);
+    expect(result.current.setEmailVerified).toBe(firstSetVerified);
+    expect(result.current.updateKey).toBe(firstUpdateKey);
+    expect(result.current.clearPartialRotation).toBe(firstClearPartial);
+    expect(result.current.logout).toBe(firstLogout);
+  });
+});
+
+describe('applyVerifiedToken local sanity check', () => {
+  // Uses the shared `buildJwt` helper at the top of this file. Signature
+  // is irrelevant — applyVerifiedToken does not verify the signature
+  // (server is the only signer; same-origin is the trust boundary). The
+  // local check is defence-in-depth against a future XHR helper letting a
+  // service worker or extension intercept the response and install garbage.
+
+  it('installs a JWT whose payload is well-formed', async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <AuthProvider>{children}</AuthProvider>
+    );
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    const userId = 'user-abc';
+    await act(async () => {
+      await result.current.login('initial-token', userId, 'a@b.com', {} as CryptoKey, false);
+    });
+
+    const fresh = buildJwt({
+      sub: userId,
+      email_verified: true,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+    act(() => result.current.applyVerifiedToken(fresh));
+
+    expect(result.current.token).toBe(fresh);
+    expect(result.current.emailVerified).toBe(true);
+  });
+
+  it.each([
+    ['not three segments', 'aaa.bbb'],
+    ['payload not base64-decodable', 'aaa.!!!.ccc'],
+    ['payload not JSON', `aaa.${btoa('not-json')}.ccc`],
+    ['sub mismatch', () => buildJwt({ sub: 'other-user', email_verified: true, exp: Math.floor(Date.now()/1000)+60 })],
+    ['email_verified !== true (string)', () => buildJwt({ sub: 'user-abc', email_verified: 'true', exp: Math.floor(Date.now()/1000)+60 })],
+    ['email_verified !== true (false)', () => buildJwt({ sub: 'user-abc', email_verified: false, exp: Math.floor(Date.now()/1000)+60 })],
+    ['exp in the past', () => buildJwt({ sub: 'user-abc', email_verified: true, exp: Math.floor(Date.now()/1000)-1 })],
+    ['exp missing', () => buildJwt({ sub: 'user-abc', email_verified: true })],
+  ])('rejects: %s', async (_label, tokenOrFactory) => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <AuthProvider>{children}</AuthProvider>
+    );
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await act(async () => {
+      await result.current.login('initial-token', 'user-abc', 'a@b.com', {} as CryptoKey, false);
+    });
+    const tokenBefore = result.current.token;
+    const verifiedBefore = result.current.emailVerified;
+
+    const bad = typeof tokenOrFactory === 'function' ? tokenOrFactory() : tokenOrFactory;
+    act(() => result.current.applyVerifiedToken(bad));
+
+    expect(result.current.token).toBe(tokenBefore);     // unchanged
+    expect(result.current.emailVerified).toBe(verifiedBefore); // unchanged
   });
 });

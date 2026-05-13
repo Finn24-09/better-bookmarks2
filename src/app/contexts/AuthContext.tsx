@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { setAuthToken } from '../../lib/api';
 import { rotationStatus } from '../../lib/auth';
 import { resendVerificationEmail } from '../../lib/email';
@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     emailVerified: false,
   });
 
-  const login = async (
+  const login = useCallback(async (
     token: string,
     userId: string,
     email: string,
@@ -67,29 +67,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Non-fatal — user can re-detect by logging out and back in.
     }
-  };
+  }, []);
 
-  const updateKey = (cryptoKey: CryptoKey) => {
+  const updateKey = useCallback((cryptoKey: CryptoKey) => {
     setState((s) => ({ ...s, cryptoKey }));
-  };
+  }, []);
 
-  const clearPartialRotation = () => {
+  const clearPartialRotation = useCallback(() => {
     setState((s) => ({ ...s, partialRotation: null }));
-  };
+  }, []);
 
-  const setEmailVerified = (verified: boolean) => {
+  const setEmailVerified = useCallback((verified: boolean) => {
     setState((s) => ({ ...s, emailVerified: verified }));
-  };
+  }, []);
 
-  const applyVerifiedToken = (token: string) => {
-    setAuthToken(token);
-    setState((s) => ({ ...s, token, emailVerified: true }));
-  };
+  const applyVerifiedToken = useCallback((token: string) => {
+    // Defence-in-depth: validate the new JWT's payload locally before
+    // installing it. Server is the only signer (same-origin trust
+    // boundary), so we deliberately do NOT verify the signature here —
+    // that would require shipping the HS256 secret to the browser. We do
+    // sanity-check that the payload's `sub` matches the current user, the
+    // `email_verified` claim is strict-true, and the token has not expired.
+    // Closes Security L-1: a future XHR helper letting a service worker or
+    // extension intercept this response cannot install an arbitrary string.
+    const parts = token.split('.');
+    if (parts.length !== 3) return;
+    let payload: { sub?: unknown; email_verified?: unknown; exp?: unknown };
+    try {
+      // Accept both standard and URL-safe base64 — jose mints URL-safe.
+      const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+      payload = JSON.parse(atob(padded));
+    } catch {
+      return;
+    }
+    if (typeof payload.exp !== 'number' || payload.exp <= Math.floor(Date.now() / 1000)) return;
+    if (payload.email_verified !== true) return;
+    setState((s) => {
+      if (typeof payload.sub !== 'string' || s.userId === null || payload.sub !== s.userId) {
+        return s;
+      }
+      // setAuthToken is called inside the functional updater so the
+      // sub-vs-userId check and the token install happen atomically against
+      // concurrent logout. React StrictMode invokes updaters twice in dev to
+      // surface impure reducers — that double-call is safe here because
+      // setAuthToken assigns to a module-level cache and is idempotent:
+      // setAuthToken(x) followed by setAuthToken(x) produces the same
+      // observable state as a single call. Production never double-calls.
+      setAuthToken(token);
+      return { ...s, token, emailVerified: true };
+    });
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setAuthToken(null);
     setState({ token: null, userId: null, email: null, cryptoKey: null, partialRotation: null, emailVerified: false });
-  };
+  }, []);
 
   return (
     <AuthContext.Provider value={{ ...state, isLoading: false, login, updateKey, clearPartialRotation, setEmailVerified, applyVerifiedToken, logout }}>
