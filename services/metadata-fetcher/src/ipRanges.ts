@@ -104,11 +104,17 @@ export const IPV4_DENY: ReadonlyArray<IpRange> = Object.freeze([
   ipv4CidrRange('240.0.0.0/4', 'reserved'),
 ]);
 
-// IPv6 denied ranges. IPv4-mapped IPv6 (::ffff:0:0/96) is handled by decoding
-// the embedded IPv4 and re-checking against IPV4_DENY in ssrfGuard.ts.
+// IPv6 denied ranges. IPv4-mapped IPv6 (::ffff:0:0/96) is also handled by the
+// dotted-form decoder in ssrfGuard.checkAddress for finer-grained logging,
+// but the wholesale /96 entry below is the authoritative deny — it also
+// catches the compressed-hex notation (e.g. ::ffff:7f00:1) that the
+// dotted-form regex misses. dns.lookup({verbatim:true}) returns A records
+// with family:4 (never v4-mapped), so the wholesale block does not regress
+// any legitimate fetch.
 export const IPV6_DENY: ReadonlyArray<IpRange> = Object.freeze([
   ipv6CidrRange('::/128', 'unspecified'),
   ipv6CidrRange('::1/128', 'loopback'),
+  ipv6CidrRange('::ffff:0:0/96', 'ipv4-mapped'),
   ipv6CidrRange('fc00::/7', 'ula'),
   ipv6CidrRange('fe80::/10', 'link-local'),
   ipv6CidrRange('2001:db8::/32', 'documentation'),

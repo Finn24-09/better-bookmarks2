@@ -249,6 +249,31 @@ describe('ssrfGuard — IPv6 deny-list', () => {
     const r = await validateUrl('http://target.example/', resolver);
     expect(r.ok).toBe(false);
   });
+
+  // PR #44 review: the dotted-form regex at ssrfGuard.checkAddress catches
+  // ::ffff:127.0.0.1, but a hostile resolver returning the equivalent
+  // compressed-hex form ::ffff:7f00:1 (same address, different notation)
+  // would miss the regex; without ::ffff:0:0/96 in IPV6_DENY the address
+  // would pass the deny-list and a request to 127.0.0.1 could succeed.
+  it('rejects IPv4-mapped IPv6 in compressed-hex form ::ffff:7f00:1', async () => {
+    const resolver = fakeResolver([{ address: '::ffff:7f00:1', family: 6 }]);
+    const r = await validateUrl('http://target.example/', resolver);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('blocked-ip');
+  });
+
+  // PR #44 review: the wholesale ::ffff:0:0/96 deny entry intentionally also
+  // blocks v4-mapped wraps of PUBLIC IPv4 addresses. This is safe because
+  // dns.lookup({verbatim:true}) returns A records with family:4 (never
+  // v4-mapped), so the wholesale block does not regress any legitimate
+  // fetch. A resolver returning a v4-mapped form for a public IPv4 is
+  // hostile or misconfigured and we want to refuse.
+  it('rejects v4-mapped wrap of public IPv4 ::ffff:8.8.8.8 (defence-in-depth)', async () => {
+    const resolver = fakeResolver([{ address: '::ffff:8.8.8.8', family: 6 }]);
+    const r = await validateUrl('http://target.example/', resolver);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('blocked-ip');
+  });
 });
 
 describe('ssrfGuard — mixed-resolution hostility', () => {
