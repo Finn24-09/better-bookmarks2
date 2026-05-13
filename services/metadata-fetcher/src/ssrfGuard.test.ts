@@ -274,6 +274,33 @@ describe('ssrfGuard — IPv6 deny-list', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('blocked-ip');
   });
+
+  // PR #44 review: three further IPv6 ranges that should never be a
+  // legitimate fetch target.
+  //   * 64:ff9b::/96 — NAT64 well-known prefix (RFC 6052). 64:ff9b::a9fe:a9fe
+  //     translates to 169.254.169.254 (cloud metadata) under NAT64.
+  //   * ff00::/8 — IPv6 multicast (RFC 4291). ff02::1 is link-local multicast.
+  //   * 2002::/16 — 6to4 (RFC 7526 deprecated). 2002:7f00:1::/24 wraps 127.0.0.0/8.
+  it('rejects NAT64-wrapped 169.254.169.254 (64:ff9b::a9fe:a9fe)', async () => {
+    const resolver = fakeResolver([{ address: '64:ff9b::a9fe:a9fe', family: 6 }]);
+    const r = await validateUrl('http://target.example/', resolver);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('blocked-ip');
+  });
+
+  it('rejects IPv6 multicast ff02::1', async () => {
+    const resolver = fakeResolver([{ address: 'ff02::1', family: 6 }]);
+    const r = await validateUrl('http://target.example/', resolver);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('blocked-ip');
+  });
+
+  it('rejects 6to4-wrapped IPv4 (2002:7f00:1::1)', async () => {
+    const resolver = fakeResolver([{ address: '2002:7f00:1::1', family: 6 }]);
+    const r = await validateUrl('http://target.example/', resolver);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('blocked-ip');
+  });
 });
 
 describe('ssrfGuard — mixed-resolution hostility', () => {

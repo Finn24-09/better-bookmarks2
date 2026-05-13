@@ -115,9 +115,14 @@ export const IPV6_DENY: ReadonlyArray<IpRange> = Object.freeze([
   ipv6CidrRange('::/128', 'unspecified'),
   ipv6CidrRange('::1/128', 'loopback'),
   ipv6CidrRange('::ffff:0:0/96', 'ipv4-mapped'),
+  ipv6CidrRange('64:ff9b::/96', 'nat64-well-known'),   // RFC 6052
   ipv6CidrRange('fc00::/7', 'ula'),
   ipv6CidrRange('fe80::/10', 'link-local'),
   ipv6CidrRange('2001:db8::/32', 'documentation'),
+  // 6to4: RFC 7526-deprecated; mirrors the IPv4 6to4-anycast wholesale-block
+  // posture at IPV4_DENY entry above (192.88.99.0/24).
+  ipv6CidrRange('2002::/16', '6to4-deprecated'),
+  ipv6CidrRange('ff00::/8', 'multicast'),              // RFC 4291
 ]);
 
 export function isIpv4Denied(ip: bigint): IpRange | null {
