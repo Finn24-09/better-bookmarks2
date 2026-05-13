@@ -12,7 +12,8 @@ import { validateUrl, type Resolver, type ValidationResult } from './ssrfGuard.j
 //   - Outbound header allowlist — exactly Host / User-Agent / Accept /
 //     Accept-Encoding (identity). Nothing from the inbound request.
 //   - 3-redirect cap; HTTPS→HTTP downgrade rejected.
-//   - 1 MiB body cap, enforced on the wire (before any Buffer.concat).
+//   - 2 MiB default body cap (env-overridable via MAX_BODY_BYTES,
+//     256 KiB-8 MiB), enforced on the wire (before any Buffer.concat).
 //   - 5 s wall-clock total timeout via AbortController.
 //   - Content-Type: text/html or application/xhtml+xml only.
 //   - Compressed responses rejected pre-decompression (gzip-bomb defence).
@@ -155,8 +156,9 @@ function isCompressed(headers: DispatchResponse['headers']): boolean {
 // resolves with the partial buffer as soon as either appears. For pages
 // like YouTube (~1.17 MiB total HTML, head ends around 615 KB) this means
 // we stop reading well before the cap; without it the title sits past the
-// 1 MiB cap and the request fails with FetchBodyTooLargeError. The cap
-// stays as a backstop for pathological pages with no </head>.
+// default 2 MiB cap on some larger SPAs and the request would fail with
+// FetchBodyTooLargeError. The cap stays as a backstop for pathological
+// pages with no </head>.
 //
 // The regex match is performed on a UTF-8 decode of (last 16 bytes of the
 // previous chunk + current chunk) so a head-close token split across a
