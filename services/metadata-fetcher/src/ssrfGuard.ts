@@ -159,10 +159,8 @@ export async function validateUrl(
   const rawHost = url.hostname;
 
   const isV4Literal = IPV4_CANONICAL_RE.test(rawHost);
-  // URL.hostname strips IPv6 brackets, so use net.isIPv6 directly.
-  const isV6Literal = net.isIPv6(rawHost);
-  const isDnsHost = !isV4Literal && !isV6Literal && isCanonicalDnsHostname(rawHost);
-  if (!isV4Literal && !isV6Literal && !isDnsHost) {
+  const isDnsHost = !isV4Literal && isCanonicalDnsHostname(rawHost);
+  if (!isV4Literal && !isDnsHost) {
     return { ok: false, reason: 'non-canonical-host' };
   }
 
@@ -179,21 +177,6 @@ export async function validateUrl(
     return {
       ok: true, scheme, host: rawHost, port,
       dialIp: rawHost, dialFamily: 4,
-      pathQuery: url.pathname + url.search,
-    };
-  }
-  if (isV6Literal) {
-    // IPv4-mapped check.
-    const v4MappedMatch = rawHost.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
-    if (v4MappedMatch && IPV4_CANONICAL_RE.test(v4MappedMatch[1])) {
-      const big = ipv4ToBigInt(v4MappedMatch[1]);
-      if (isIpv4Denied(big)) return { ok: false, reason: 'blocked-ip' };
-    }
-    const big = ipv6ToBigInt(rawHost);
-    if (isIpv6Denied(big)) return { ok: false, reason: 'blocked-ip' };
-    return {
-      ok: true, scheme, host: rawHost, port,
-      dialIp: rawHost, dialFamily: 6,
       pathQuery: url.pathname + url.search,
     };
   }

@@ -294,6 +294,20 @@ describe('ssrfGuard — return shape', () => {
   });
 });
 
+describe('IPv6 literal handling (Task 6)', () => {
+  it.each([
+    'http://[::1]/',
+    'http://[::ffff:127.0.0.1]/',
+    'http://[fe80::1]/',
+    'http://[2001:db8::1]/',
+    'http://[2606:4700:4700::1111]/',  // public Cloudflare DNS — still rejected
+  ])('rejects IPv6 literal %s as non-canonical-host', async (url) => {
+    const result = await validateUrl(url);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('non-canonical-host');
+  });
+});
+
 describe('IANA special-purpose IPv4 ranges (Task 5)', () => {
   it.each([
     ['192.0.0.1', 'iana-assigned'],
