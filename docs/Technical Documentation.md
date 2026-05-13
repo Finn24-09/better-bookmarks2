@@ -454,7 +454,7 @@ A pure-webapp implementation that fetches `<title>` from an arbitrary URL is ess
 
 SSRF is the primary risk. Defences in layered order (`services/metadata-fetcher/src/`):
 - `ssrfGuard.ts` — scheme allowlist, userinfo rejection, hostname canonicalisation (rejects decimal/hex/octal/dotless/trailing-dot/percent-encoded host disguises), scheme-default port only (80/443), full IPv4 + IPv6 deny-list (`ipRanges.ts`) covering RFC1918, loopback, link-local (incl. cloud-metadata 169.254.169.254), CGNAT, multicast, reserved, ULA, IPv4-mapped IPv6. DNS lookup via `dns.lookup({ all:true, verbatim:true })`; **any-address-private = reject**. Returns the resolved IP for the caller to dial — closes DNS rebinding TOCTOU.
-- `fetcher.ts` — dial-by-IP with SNI/Host set to the original hostname; TLS minVersion 1.2; closed-set outbound headers (`Host`, `User-Agent`, `Accept`, `Accept-Encoding: identity` — nothing from the inbound request); 3-redirect cap with HTTPS→HTTP downgrade rejection and per-hop guard re-runs; 1 MiB streamed body cap aborted before any `Buffer.concat`; 5 s wall-clock total timeout; content-type allowlist (`text/html`, `application/xhtml+xml`); gzip / br / deflate response rejected (gzip-bomb defence).
+- `fetcher.ts` — dial-by-IP with SNI/Host set to the original hostname; TLS minVersion 1.2; closed-set outbound headers (`Host`, `User-Agent`, `Accept`, `Accept-Encoding: identity` — nothing from the inbound request); 3-redirect cap with HTTPS→HTTP downgrade rejection and per-hop guard re-runs; 2 MiB streamed body cap (env-overridable up to 8 MiB via `MAX_BODY_BYTES`) aborted before any `Buffer.concat`; 5 s wall-clock total timeout; content-type allowlist (`text/html`, `application/xhtml+xml`); gzip / br / deflate response rejected (gzip-bomb defence).
 - `titleExtractor.ts` — `htmlparser2` streaming parser, stops at `</head>`. Priority `og:title` → `twitter:title` → `<title>`, entity-decoded, whitespace-normalised, clamped to 500 chars. Charset from HTTP header only; `<meta charset>` inside the document is intentionally ignored to prevent attacker control over the decoder.
 - `errorSanitizer.ts` — walks `err.cause` (depth-5 cap) and scrubs URLs, IPs, and the in-flight target hostname out of `err.message` and `err.input` BEFORE pino sees the error object. Closes the leak path pino's `redact` cannot reach (substring scrubbing inside string values).
 - `concurrency.ts` — global semaphore (cap 32 → 503) plus per-user semaphore (cap 3 → 429). Plus per-route rate limit 30/min per JWT sub.
@@ -465,7 +465,7 @@ The target URL, the hostname, and any resolved IP are treated as sensitive PII f
 
 ### Deployment posture
 
-- Docker: `node:22-alpine` runner, `USER node`, `cap_drop: ALL`, `read_only: true`, mem 128m / cpu 0.5.
+- Docker: `node:22-alpine` runner, `USER node`, `cap_drop: ALL`, `read_only: true`, mem 256m / cpu 0.5.
 - Network: attached only to `metadata_net`. The `frontend` container bridges both `betterbookmarks2` (where db/postgrest live) and `metadata_net`, but the metadata-fetcher itself has no L3 reach to the data tier.
 - Auth: JWT verified via `jose`; pinned audience `metadata-svc`. `api._sign_jwt` mints `aud=["email-svc","metadata-svc"]` so the same session token authenticates both sibling backends (jose 6 set-membership). The SQL migration in `docker/db/init/11_jwt_audience.sql` is already idempotent (`BEGIN; CREATE OR REPLACE FUNCTION ...; COMMIT;`) and is applied to existing volumes via:
   ```
