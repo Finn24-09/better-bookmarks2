@@ -64,6 +64,17 @@ export const refreshAfterVerifyRoute: FastifyPluginAsync = async (fastify) => {
       // row missing — token still valid against a deleted user, e.g. mid
       // account-deletion). Both collapse to a single user-visible state
       // that the frontend can silently retry-via-next-sign-in.
+      //
+      // The collapse is DELIBERATE anti-enumeration. Distinguishing
+      // 'unverified' from 'window expired' from 'user not found' would let
+      // an attacker holding only a JWT enumerate account state via the
+      // refresh endpoint. Scope of the remaining leak: a 200 response
+      // confirms email_verified_at is within the last 5 minutes — but
+      // ONLY for the JWT-bearer's own user (sub is taken from the bearer
+      // token, never from an attacker-controlled body field), so the route
+      // cannot be turned into an oracle for arbitrary user IDs by a third
+      // party. Sub-millisecond timing differences between the two error
+      // branches are below the network noise floor.
       const code = (err as { code?: string }).code;
       if (code === '23514' || code === 'P0002') {
         return reply.status(410).send({ error: 'Verification window expired' });
