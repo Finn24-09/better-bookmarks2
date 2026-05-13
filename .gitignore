@@ -46,3 +46,6 @@ Thumbs.db
 
 # Claude local settings
 .claude/
+
+# Local and individual helper scripts
+helper-scripts/
