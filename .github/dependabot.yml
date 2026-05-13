@@ -60,3 +60,23 @@ updates:
       - "dependencies"
       - "email-service"
     open-pull-requests-limit: 10
+
+  - package-ecosystem: "npm"
+    directory: "/services/metadata-fetcher"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Berlin"
+    groups:
+      # Patch + minor bundled weekly. Majors (fastify, jose, htmlparser2, prom-client)
+      # come as individual PRs — they touch the SSRF / JWT / HTML-parsing boundary and
+      # deserve isolated review.
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+    labels:
+      - "dependencies"
+      - "metadata-fetcher"
+    open-pull-requests-limit: 10
