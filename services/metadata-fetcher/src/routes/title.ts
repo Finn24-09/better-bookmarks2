@@ -18,14 +18,9 @@ import {
 } from '../fetcher.js';
 import { extractTitle } from '../titleExtractor.js';
 import { Semaphore, PerKeySemaphore } from '../concurrency.js';
-import { requestsTotal, type Outcome, dnsLatencySeconds as _dns, upstreamLatencySeconds, bodyTerminationTotal } from '../metrics.js';
+import { requestsTotal, type Outcome, upstreamLatencySeconds, bodyTerminationTotal } from '../metrics.js';
 import { sanitizeErrorChain } from '../errorSanitizer.js';
 import type { Resolver } from '../ssrfGuard.js';
-
-// Silence unused-import warning while keeping the histogram exported for
-// later wiring. The Phase-4 route does not populate dnsLatencySeconds
-// directly — that's a Phase-5 / future-work observability extension.
-void _dns;
 
 const bodySchema = z.object({
   url: z.string().min(1).max(2000),

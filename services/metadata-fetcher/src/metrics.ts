@@ -11,11 +11,7 @@ import { Registry, collectDefaultMetrics, Counter, Histogram } from 'prom-client
 export const OUTCOMES = [
   'ok',
   'invalid-input',
-  'blocked-scheme',
-  'blocked-userinfo',
-  'blocked-port',
-  'blocked-host',
-  'blocked-ip',
+  'blocked-host',          // every FetchBlockedError collapses here
   'content-type-rejected',
   'body-too-large',
   'compressed-body',
