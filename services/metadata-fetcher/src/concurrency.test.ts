@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Semaphore } from './concurrency.js';
+import { Semaphore, PerKeySemaphore } from './concurrency.js';
 
 describe('Semaphore', () => {
   it('acquire returns immediately under cap', async () => {
@@ -53,5 +53,50 @@ describe('Semaphore', () => {
     expect(sem.inFlight).toBe(2);
     sem.release();
     expect(sem.inFlight).toBe(1);
+  });
+});
+
+describe('PerKeySemaphore', () => {
+  it('isolates capacity per key', () => {
+    const sem = new PerKeySemaphore(1);
+    expect(sem.tryAcquire('a')).toBe(true);
+    expect(sem.tryAcquire('a')).toBe(false);
+    expect(sem.tryAcquire('b')).toBe(true);
+    sem.release('a');
+    sem.release('b');
+  });
+
+  it('GCs the per-key Semaphore once idle', () => {
+    const sem = new PerKeySemaphore(2);
+    sem.tryAcquire('alice');
+    sem.tryAcquire('alice');
+    sem.release('alice');
+    sem.release('alice');
+    // Re-acquire after full release should hit a fresh internal Semaphore;
+    // exercise it to make sure the GC didn't break anything.
+    expect(sem.tryAcquire('alice')).toBe(true);
+    sem.release('alice');
+  });
+
+  it('release-then-waiter-resume keeps the semaphore alive (no orphaned waiters)', async () => {
+    const sem = new PerKeySemaphore(1);
+    expect(sem.tryAcquire('alice')).toBe(true);
+    let resolved = false;
+    const waiterPromise = sem.acquire('alice').then(() => { resolved = true; });
+    await Promise.resolve();  // queue the waiter
+    sem.release('alice');     // hands the slot to the waiter
+    await waiterPromise;
+    expect(resolved).toBe(true);
+    // The waiter is now holding the slot. A second waiter on the same key
+    // MUST still queue against the same semaphore (i.e. tryAcquire returns
+    // false), proving the semaphore was not GC'd between release and
+    // resume.
+    expect(sem.tryAcquire('alice')).toBe(false);
+    sem.release('alice');
+  });
+
+  it('throws on release for unknown key', () => {
+    const sem = new PerKeySemaphore(1);
+    expect(() => sem.release('nobody')).toThrow(/unknown key/);
   });
 });

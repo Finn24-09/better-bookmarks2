@@ -15,6 +15,10 @@ export class Semaphore {
     return this.acquired;
   }
 
+  get pending(): number {
+    return this.waiters.length;
+  }
+
   /** Resolves once a slot is free. Always pair with a release(). */
   acquire(): Promise<void> {
     if (this.acquired < this.capacity) {
@@ -82,7 +86,11 @@ export class PerKeySemaphore {
       throw new Error(`PerKeySemaphore release for unknown key`);
     }
     sem.release();
-    // GC entry once idle and no waiters.
-    if (sem.inFlight === 0) this.perKey.delete(key);
+    // GC entry once idle AND no waiters. The current Semaphore.release
+    // synchronously hands the freed slot to the next waiter (re-incrementing
+    // inFlight before this check runs), but checking both conditions
+    // explicitly makes the invariant local-readable and survives any
+    // future change to Semaphore.release that resolves waiters async.
+    if (sem.inFlight === 0 && sem.pending === 0) this.perKey.delete(key);
   }
 }
