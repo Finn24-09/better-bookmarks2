@@ -25,6 +25,16 @@ import type { RateLimitOptions, RateLimitPluginOptions } from '@fastify/rate-lim
  * Key authenticated routes by JWT `sub` (user id) when present, falling
  * back to remote IP. Authenticated routes that omit this fallback would
  * become free-for-all when the token is missing.
+ *
+ * Trust caveat: the JWT payload is parsed WITHOUT signature verification —
+ * the verifier on the route itself enforces auth, this is purely a
+ * rate-limit key. An attacker forging arbitrary `sub` values in
+ * JWT-shaped strings can rotate buckets to sidestep IP-based caps. Blast
+ * radius is bounded by (a) the per-route caps being tight (3-10 req/min),
+ * (b) the route's own jose verifyJwt rejecting the forged token before
+ * any side-effect, and (c) Nginx applying its own per-IP cap as a
+ * defence-in-depth layer ahead of this. Do NOT extend any trust beyond
+ * "this string is a Base64-decodable thing" to the parsed payload.
  */
 function userOrIpKey(req: FastifyRequest): string {
   const auth = req.headers.authorization;
