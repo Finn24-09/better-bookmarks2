@@ -93,6 +93,13 @@ export const IPV4_DENY: ReadonlyArray<IpRange> = Object.freeze([
   ipv4CidrRange('169.254.0.0/16', 'link-local'),
   ipv4CidrRange('172.16.0.0/12', 'rfc1918-172'),
   ipv4CidrRange('192.168.0.0/16', 'rfc1918-192'),
+  // IANA special-purpose registry (RFC 6890 master list).
+  ipv4CidrRange('192.0.0.0/24', 'iana-assigned'),         // RFC 6890
+  ipv4CidrRange('192.0.2.0/24', 'test-net-1'),            // RFC 5737
+  ipv4CidrRange('192.88.99.0/24', '6to4-anycast'),        // RFC 7526 (deprecated, must not route)
+  ipv4CidrRange('198.18.0.0/15', 'benchmarking'),         // RFC 2544
+  ipv4CidrRange('198.51.100.0/24', 'test-net-2'),         // RFC 5737
+  ipv4CidrRange('203.0.113.0/24', 'test-net-3'),          // RFC 5737
   ipv4CidrRange('224.0.0.0/4', 'multicast'),
   ipv4CidrRange('240.0.0.0/4', 'reserved'),
 ]);

@@ -293,3 +293,19 @@ describe('ssrfGuard — return shape', () => {
     }
   });
 });
+
+describe('IANA special-purpose IPv4 ranges (Task 5)', () => {
+  it.each([
+    ['192.0.0.1', 'iana-assigned'],
+    ['192.0.2.10', 'test-net-1'],
+    ['198.18.0.5', 'benchmarking'],
+    ['198.19.255.255', 'benchmarking'],
+    ['198.51.100.50', 'test-net-2'],
+    ['203.0.113.5', 'test-net-3'],
+    ['192.88.99.1', '6to4-anycast-deprecated'],
+  ])('rejects %s as %s', async (ip, _label) => {
+    const result = await validateUrl(`http://${ip}/`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('blocked-ip');
+  });
+});
