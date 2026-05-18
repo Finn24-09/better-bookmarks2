@@ -87,9 +87,33 @@ describe('verifyJwt', () => {
     await expect(verifyJwt(`Bearer ${token}`)).rejects.toMatchObject({ statusCode: 401 });
   });
 
-  it('H-4: accepts a token with correct aud=email-svc', async () => {
+  // Rolling-deploy regression: during a deploy in which some signers still
+  // emit the legacy single-string aud claim (`aud: 'email-svc'`) while
+  // others emit the multi-audience array (`aud: ['email-svc',
+  // 'metadata-svc']`), this service MUST continue to accept both shapes.
+  // Symmetric counterpart in services/metadata-fetcher/src/jwt.test.ts
+  // ('accepts a single-string aud=metadata-svc token').
+  it('H-4: accepts a single-string aud=email-svc token (rolling-deploy regression)', async () => {
     const token = await makeToken({ aud: 'email-svc' });
     const result = await verifyJwt(`Bearer ${token}`);
     expect(result.sub).toBe('00000000-0000-4000-8000-000000000001');
+  });
+
+  // Multi-audience regression: once api._sign_jwt mints
+  // aud=["email-svc","metadata-svc"], jose 6 must continue to accept the
+  // array claim against this service's audience: 'email-svc' configuration.
+  // jose treats a string requested audience as set-membership against an
+  // array claim, so this verifier accepts as long as the array contains the
+  // expected value. If this test ever fails, the multi-aud deploy will break
+  // every freshly-minted token against the email service.
+  it('H-4: accepts a token whose aud array claim contains email-svc', async () => {
+    const token = await makeToken({ aud: ['email-svc', 'metadata-svc'] });
+    const result = await verifyJwt(`Bearer ${token}`);
+    expect(result.sub).toBe('00000000-0000-4000-8000-000000000001');
+  });
+
+  it('H-4: rejects a token whose aud array does NOT contain email-svc', async () => {
+    const token = await makeToken({ aud: ['metadata-svc'] });
+    await expect(verifyJwt(`Bearer ${token}`)).rejects.toMatchObject({ statusCode: 401 });
   });
 });

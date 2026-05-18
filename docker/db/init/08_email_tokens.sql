@@ -509,6 +509,14 @@ GRANT EXECUTE ON FUNCTION api.sign_up(TEXT, TEXT) TO anon;
 -- user who verifies after sign-in would otherwise be wrongly blocked until
 -- their JWT expires.
 --
+-- CARVE-OUT: The metadata-fetcher service (services/metadata-fetcher/) is
+-- the documented exception to this invariant. It runs on the dedicated
+-- `metadata_net` Docker network with no L3 path to `db` (a deliberate SSRF
+-- blast-radius cap; see docker-compose.yml) — it CANNOT read this column.
+-- For that service only, gating is claim-based, and the staleness gap is
+-- closed by auth.mint_post_verify_jwt + POST /api/email/refresh-after-verify.
+-- See docker/db/init/12_post_verify_jwt.sql for the full carve-out rationale.
+--
 -- DEPLOYMENT NOTE — forced re-login window:
 -- An earlier shipped state of api.sign_in violated invariant 2 (called the
 -- 4-arg _sign_jwt with only 2 args, getting tv=0 from the default). JWTs

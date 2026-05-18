@@ -435,6 +435,77 @@ After a successful client-side key rotation, `ChangePasswordModal` calls `notify
 
 ---
 
+## 6A. Metadata-Fetcher Service (`services/metadata-fetcher/`)
+
+Stateless Fastify microservice that performs the server-side `<title>` extraction backing the auto-fill button on the bookmark form. Sees the URL transiently during the fetch and never persists it; bound to its own `metadata_net` Docker network with no L3 path to `db` or `postgrest`.
+
+### Why this service exists
+
+A pure-webapp implementation that fetches `<title>` from an arbitrary URL is essentially impossible in modern browsers — same-origin policy blocks cross-origin `fetch` reads for any site that does not explicitly send permissive CORS headers, which the long tail of bookmarkable sites does not. This service is the controlled, transient regression from the otherwise strict zero-knowledge invariant: only the URL itself crosses the trust boundary, no encryption keys, no persistence, no logging of the URL.
+
+### Endpoint
+
+`POST /api/title/` (bearer JWT, audience `metadata-svc`):
+- Request body (zod): `{ url: string }` — http/https only, length ≤ 2000, no userinfo.
+- Response: `{ title: string | null }` (null = page parsed but no candidate found).
+- Errors: 400 (invalid input), 401 (auth), 422 (SSRF / content-type / size / redirect / compressed-body), 429 (per-user rate or concurrent cap), 502 (upstream), 503 (global concurrent cap), 504 (timeout). Every body is `{ error: "<short generic message>" }`.
+
+### Threat boundary
+
+SSRF is the primary risk. Defences in layered order (`services/metadata-fetcher/src/`):
+- `ssrfGuard.ts` — scheme allowlist, userinfo rejection, hostname canonicalisation (rejects decimal/hex/octal/dotless/trailing-dot/percent-encoded host disguises), scheme-default port only (80/443), full IPv4 + IPv6 deny-list (`ipRanges.ts`) covering RFC1918, loopback, link-local (incl. cloud-metadata 169.254.169.254), CGNAT, multicast, reserved, ULA, IPv4-mapped IPv6. DNS lookup via `dns.lookup({ all:true, verbatim:true })`; **any-address-private = reject**. Returns the resolved IP for the caller to dial — closes DNS rebinding TOCTOU.
+- `fetcher.ts` — dial-by-IP with SNI/Host set to the original hostname; TLS minVersion 1.2; closed-set outbound headers (`Host`, `User-Agent`, `Accept`, `Accept-Encoding: identity` — nothing from the inbound request); 3-redirect cap with HTTPS→HTTP downgrade rejection and per-hop guard re-runs; 2 MiB streamed body cap (env-overridable up to 8 MiB via `MAX_BODY_BYTES`) aborted before any `Buffer.concat`; 5 s wall-clock total timeout; content-type allowlist (`text/html`, `application/xhtml+xml`); gzip / br / deflate response rejected (gzip-bomb defence).
+- `titleExtractor.ts` — `htmlparser2` streaming parser, stops at `</head>`. Priority `og:title` → `twitter:title` → `<title>`, entity-decoded, whitespace-normalised, clamped to 500 chars. Charset from HTTP header only; `<meta charset>` inside the document is intentionally ignored to prevent attacker control over the decoder.
+- `errorSanitizer.ts` — walks `err.cause` (depth-5 cap) and scrubs URLs, IPs, and the in-flight target hostname out of `err.message` and `err.input` BEFORE pino sees the error object. Closes the leak path pino's `redact` cannot reach (substring scrubbing inside string values).
+- `concurrency.ts` — global semaphore (cap 32 → 503) plus per-user semaphore (cap 3 → 429). Plus per-route rate limit 30/min per JWT sub.
+
+### What never appears in logs
+
+The target URL, the hostname, and any resolved IP are treated as sensitive PII for the duration of the request. `LOG_REDACT_PATHS` covers `req.body.url`, `req.body.*.url`, `err.input`, `err.config.url`, `err.request.url`; `reqSerializer` scrubs `?token=` / `?code=` from `req.url`; the error sanitiser handles `error.message` substrings the redact paths cannot match. Per-request structured fields include only `request_id`, `user_id`, `outcome` (closed enum — see `metrics.ts` `OUTCOMES`), `latency_ms`. The `/metrics` endpoint exposes counters and histograms keyed only by the outcome enum.
+
+### Deployment posture
+
+- Docker: `node:22-alpine` runner, `USER node`, `cap_drop: ALL`, `read_only: true`, mem 256m / cpu 0.5.
+- Network: attached only to `metadata_net`. The `frontend` container bridges both `betterbookmarks2` (where db/postgrest live) and `metadata_net`, but the metadata-fetcher itself has no L3 reach to the data tier.
+- Auth: JWT verified via `jose`; pinned audience `metadata-svc`. `api._sign_jwt` mints `aud=["email-svc","metadata-svc"]` so the same session token authenticates both sibling backends (jose 6 set-membership). The SQL migration in `docker/db/init/11_jwt_audience.sql` is already idempotent (`BEGIN; CREATE OR REPLACE FUNCTION ...; COMMIT;`) and is applied to existing volumes via:
+  ```
+  docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -f /docker-entrypoint-initdb.d/11_jwt_audience.sql
+  ```
+  No forced re-login window — this migration adds a member to the existing array, which jose set-membership already accepts.
+- Nginx: exact-match `POST /api/title/` route, scrubbed access log, 30r/m limit zone, `Cross-Origin-Resource-Policy: same-origin`. Wildcard `^~ /api/title/` returns 404 so `/health` and `/metrics` are unreachable from outside the deployment.
+
+### Operator observability
+
+- `docker compose logs metadata-fetcher` shows the version banner on every container start (`metadata-fetcher v<X.Y.Z> starting (node ...)`) plus the structured per-request log.
+- `/metrics` (internal-only) emits `metadata_fetcher_requests_total{outcome="..."}` plus latency histograms. Grep by outcome to triage incidents without needing per-request URLs.
+
+### Frontend integration
+
+`src/lib/titleFetch.ts` is the client. It mirrors `src/lib/email.ts`'s shape (does NOT use `apiFetch`, which is PostgREST-specific). Every non-200 maps to a stable `TitleFetchError` kind; the UI surfaces a generic toast and leaves the title field unchanged. The auto-fill feature is non-essential — the bookmark form remains fully usable when the service is unreachable, slow, or returning errors (covered by an explicit graceful-degradation test).
+
+### Troubleshooting
+
+The auto-fill button shows "Couldn't fetch title. Please enter it manually." on every URL with no useful container log line. Two distinct causes produce this exact symptom:
+
+1. **JWT audience mismatch on an existing DB volume.** The multi-audience SQL migration in `docker/db/init/11_jwt_audience.sql` runs only on fresh DB volumes (`/docker-entrypoint-initdb.d/` semantics). If your dev DB volume predates this feature, freshly-minted tokens still carry `aud="email-svc"` (single string) which the metadata-fetcher rejects against its `audience: 'metadata-svc'` check, returning 401. Apply the migration once against the running container:
+   ```
+   docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+     -f /docker-entrypoint-initdb.d/11_jwt_audience.sql
+   ```
+   Then sign out + sign in to mint a fresh token with the array audience.
+
+2. **Stale route 404 from a routing-layer drift** (closed in the source by `routerOptions.ignoreTrailingSlash: true` in `services/metadata-fetcher/src/index.ts`). If a future change re-disables that flag or re-introduces a path mismatch between the Vite dev proxy and the service, `POST /title/` would 404 with the same UI symptom. Diagnose by curling the service directly with a valid bearer:
+   ```
+   curl -i -X POST http://localhost:5002/title \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"url":"https://example.com/"}'
+   ```
+   200 → service is healthy; the issue is in front of it (Vite proxy or Nginx). 401 → token shape (cause #1). 404 → routing regression.
+
+---
+
 ## 7. Authentication (`src/lib/auth.ts` + `AuthContext`)
 
 ### `signIn` / `signUp`

@@ -17,6 +17,7 @@ import { EmailVerificationBanner } from "./components/EmailVerificationBanner";
 import { useBookmarks } from "./hooks/useBookmarks";
 import { useAuth } from "./contexts/AuthContext";
 import { RecoveryModal } from "./components/RecoveryModal";
+import { refreshAfterVerify } from "../lib/email";
 import type { Bookmark } from "../lib/bookmarks";
 
 export default function App() {
@@ -28,10 +29,20 @@ export default function App() {
 }
 
 function useHashFragmentHandler() {
-  const { setEmailVerified } = useAuth();
+  const { setEmailVerified, applyVerifiedToken } = useAuth();
   const [deleteToken, setDeleteToken] = useState<string | null>(null);
 
   useEffect(() => {
+    // Guard against a late refreshAfterVerify resolution writing the
+    // post-verify JWT back into auth state after the user has logged out
+    // (router unmounts the home route → effect cleanup runs → cancelled=true).
+    // The AbortController tears down the in-flight HTTP request itself
+    // so the email service is not asked to mint a JWT for an abandoned
+    // session. `cancelled` stays as belt-and-suspenders for the case
+    // where the response arrived before the cleanup ran.
+    let cancelled = false;
+    const controller = new AbortController();
+
     const hash = window.location.hash;
     if (!hash) return;
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -44,6 +55,16 @@ function useHashFragmentHandler() {
       if (params.get('success') === 'true') {
         setEmailVerified(true);
         toast.success('Email verified successfully.');
+        // Pick up a fresh JWT carrying email_verified=true so the
+        // metadata-fetcher gate accepts the user's next /title call
+        // without waiting for them to sign in again. Failures are silent
+        // by design (route may be missing during a rolling deploy, or the
+        // 5-minute window may have lapsed) — verification itself already
+        // succeeded; the user falls back to next-sign-in refresh.
+        refreshAfterVerify(controller.signal).then((result) => {
+          if (cancelled || !result) return;
+          applyVerifiedToken(result.token);
+        });
       } else {
         toast.error('Email verification failed. The link may have expired.');
       }
@@ -52,7 +73,12 @@ function useHashFragmentHandler() {
       const token = params.get('token');
       if (token) setDeleteToken(token);
     }
-  }, [setEmailVerified]);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [setEmailVerified, applyVerifiedToken]);
 
   return { deleteToken, clearDeleteToken: () => setDeleteToken(null) };
 }

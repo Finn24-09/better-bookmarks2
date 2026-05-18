@@ -2,43 +2,53 @@
 -- 11_jwt_audience.sql
 -- Add an `aud` (audience) claim to every JWT minted by api._sign_jwt so that
 -- tokens issued for the app session can be cryptographically scoped to the
--- intended consumer. Specifically, the email service (services/email/) needs
--- a way to reject any JWT that PostgREST minted for itself but which is
--- replayed against the email service's privileged routes — they share the
--- HS256 signing secret, so without an audience claim a session token is
--- indistinguishable from a token meant for the email API.
+-- intended consumer. Since this migration was first introduced, a second
+-- sibling service (services/metadata-fetcher/) joined the email service. Both
+-- share the HS256 signing secret with PostgREST, so without an audience claim
+-- a session token is indistinguishable from a token meant for either API.
 --
--- Why a new file rather than editing 08_email_tokens.sql:
--- The init scripts in docker/db/init/ are versioned incrementally (07, 08,
--- 09, 10 already exist; this is 11). Each migration is committed independently
--- and applied in lexical order by the postgres:16-alpine entrypoint on fresh
--- init. Re-touching 08 would muddy the audit trail of what changed when, and
--- would re-issue the function under the same migration version even though
--- the semantics changed in a follow-up.
+-- The mint emits an ARRAY `aud=['email-svc','metadata-svc']` so the same
+-- token authenticates both backends. `jose` 6 verification treats a string
+-- requested audience as set-membership against an array claim, so the email
+-- service (audience: 'email-svc') and metadata-fetcher (audience:
+-- 'metadata-svc') both accept the same token.
+--
+-- Why a single in-place file rather than a new docker/db/migrations/ tree:
+-- this file lives in docker/db/init/ which is mounted read-only into the
+-- running db container at /docker-entrypoint-initdb.d/. Fresh-volume
+-- installs run it during init; existing volumes can re-apply it without
+-- inventing a new migration tooling story by running:
+--
+--   docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+--     -f /docker-entrypoint-initdb.d/11_jwt_audience.sql
+--
+-- BEGIN; CREATE OR REPLACE FUNCTION; COMMIT; is atomic at the catalog level
+-- (PostgreSQL takes an AccessExclusiveLock on the function's pg_proc row),
+-- so the migration is idempotent and safe to re-run any number of times.
 --
 -- Compatibility on the PostgREST side:
 -- PostgREST does NOT enforce `PGRST_JWT_AUD` in our compose file (no env
 -- var set), so an extra `aud` claim is silently ignored by PostgREST itself.
--- Tokens minted with `aud='email-svc'` continue to authenticate every
+-- Tokens minted with the audience array continue to authenticate every
 -- existing PostgREST RPC and table call — no behavior change there.
 --
--- Compatibility on the email-service side:
--- services/email/src/jwt.ts strictly verifies `aud == 'email-svc'`. Once
--- this migration is applied, every freshly minted JWT carries the right
--- audience and is accepted by both PostgREST and the email service.
+-- Compatibility on the per-service backends:
+-- services/email/src/jwt.ts strictly verifies `aud == 'email-svc'`.
+-- services/metadata-fetcher/src/jwt.ts strictly verifies `aud == 'metadata-svc'`.
+-- jose 6's audience claim check is set-membership: a string audience passes
+-- against an array claim that contains it. Confirmed by a regression test in
+-- services/email/src/jwt.test.ts that asserts an array-claim token verifies
+-- under audience: 'email-svc'.
 --
--- DEPLOYMENT NOTE — forced re-login window (mirrors the tv=0 precedent in
--- 08_email_tokens.sql):
--- JWTs that were already in flight when this migration is applied have NO
--- `aud` claim. They will continue to pass PostgREST verification (PostgREST
--- ignores `aud` here) but will FAIL strict verification at the email
--- service. A user whose JWT was issued before the deploy and who hits
--- /resend-verification, /request-delete, /confirm-delete, or
--- /notify-password-change inside the JWT's 24-hour TTL will see a 401 and
--- must re-authenticate. After that the new JWT carries `aud=email-svc` and
--- everything works. This is the same shape of one-time forced re-login as
--- the tv=0 rollout window — it self-heals within 24 hours and is the
--- intended outcome. Do NOT respond by rolling this back.
+-- DEPLOYMENT NOTE — NO forced re-login window:
+-- The previous version of this migration introduced a forced re-login window
+-- because it added an `aud` claim from scratch and pre-deploy in-flight tokens
+-- had no `aud`. That window has already been paid; this revision (adding
+-- `metadata-svc` to the existing array) is a pure no-op for the email service
+-- (jose set-membership over `email-svc` continues to pass) and for the
+-- metadata-fetcher (it has no traffic until this migration AND the new Nginx
+-- route AND the new container are all deployed — the metadata-fetcher rejects
+-- any traffic that arrives before the migration takes effect).
 --
 -- This migration is otherwise a pure no-op for any user whose JWT was
 -- minted after the deploy.
@@ -46,10 +56,10 @@
 
 BEGIN;
 
--- Re-create api._sign_jwt with an extra `aud` claim. Signature is unchanged
--- (UUID, TEXT, INTEGER, BOOLEAN), so CREATE OR REPLACE updates the function
--- in place without disturbing existing grants. The REVOKE/GRANT pair is
--- re-issued defensively below in case this migration is ever applied
+-- Re-create api._sign_jwt with a multi-audience `aud` array claim. Signature
+-- is unchanged (UUID, TEXT, INTEGER, BOOLEAN), so CREATE OR REPLACE updates
+-- the function in place without disturbing existing grants. The REVOKE/GRANT
+-- pair is re-issued defensively below in case this migration is ever applied
 -- against a fresh database where the prior 08-defined function has been
 -- replaced wholesale rather than altered.
 
@@ -79,7 +89,7 @@ BEGIN
       'role',           'app_user',
       'sub',            p_user_id::TEXT,
       'email',          p_user_email,
-      'aud',            'email-svc',
+      'aud',            json_build_array('email-svc', 'metadata-svc'),
       'tv',             p_token_version,
       'email_verified', p_email_verified,
       'exp',            EXTRACT(EPOCH FROM NOW() + INTERVAL '24 hours')::BIGINT

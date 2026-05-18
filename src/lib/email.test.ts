@@ -18,6 +18,7 @@ const {
   requestAccountDeletion,
   confirmAccountDeletion,
   notifyPasswordChanged,
+  refreshAfterVerify,
 } = await import('./email');
 
 describe('requestPasswordReset', () => {
@@ -102,5 +103,132 @@ describe('notifyPasswordChanged', () => {
   it('resolves even on non-ok response', async () => {
     fetchMock.mockResolvedValueOnce(new Response('{}', { status: 500 }));
     await expect(notifyPasswordChanged()).resolves.toBeUndefined();
+  });
+});
+
+describe('refreshAfterVerify', () => {
+  it('POSTs to /api/email/refresh-after-verify with Authorization header', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ token: 'new.jwt.value' }), { status: 200 }),
+    );
+    await refreshAfterVerify();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/email/refresh-after-verify',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer mock-jwt-token' }),
+      }),
+    );
+  });
+
+  it('returns { token } on 200', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ token: 'new.jwt.value' }), { status: 200 }),
+    );
+    const result = await refreshAfterVerify();
+    expect(result).toEqual({ token: 'new.jwt.value' });
+  });
+
+  it('returns null on 410 Gone (verification window expired) — falls back to next-sign-in refresh', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 410 }));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+  });
+
+  it('returns null on 404 (route not yet deployed — backwards-compat with rolling deploys)', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 404 }));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+  });
+
+  it('returns null on network failure (does NOT throw — verify itself already succeeded)', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('network failure'));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the response body is malformed JSON (and leaves a console.warn breadcrumb)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(new Response('not-json', { status: 200 }));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('returns null when the response is missing a token (and leaves a console.warn breadcrumb)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ unrelated: 'field' }), { status: 200 }),
+    );
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  // Server returns a parseable JSON value that is null, an array, a number,
+  // or a string. Null / number / string fall into the non-object branch;
+  // array falls through (typeof [] === 'object') and lands on the
+  // missing-token branch. Either way the contract is the same: one warn,
+  // return null. Guards the silent-fallback contract against a server
+  // regression that swaps the success body shape.
+  it.each([
+    ['null body',     'null'],
+    ['array body',    '[]'],
+    ['number body',   '42'],
+    ['string body',   '"oops"'],
+  ])('returns null when the response body is %s (and leaves a console.warn breadcrumb)', async (_label, payload) => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(new Response(payload, { status: 200 }));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('does NOT log a breadcrumb for legitimate failures (404 / 410 / network) — those are expected paths', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 410 }));
+    expect(await refreshAfterVerify()).toBeNull();
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 404 }));
+    expect(await refreshAfterVerify()).toBeNull();
+    fetchMock.mockRejectedValueOnce(new TypeError('network failure'));
+    expect(await refreshAfterVerify()).toBeNull();
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+describe('refreshAfterVerify AbortSignal', () => {
+  it('forwards the AbortSignal to fetch', async () => {
+    const controller = new AbortController();
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ token: 'fresh' }), { status: 200 }),
+    );
+
+    await refreshAfterVerify(controller.signal);
+
+    const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(opts.signal).toBe(controller.signal);
+  });
+
+  it('returns null when fetch rejects with AbortError (aborted request)', async () => {
+    // The wrapper catches all fetch rejections and maps to null; the
+    // AbortError name is incidental — the contract is "any rejection → null".
+    fetchMock.mockRejectedValueOnce(new Error('aborted'));
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await refreshAfterVerify(controller.signal);
+    expect(result).toBeNull();
+  });
+
+  it('with no signal still works (backwards-compatible)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ token: 'fresh' }), { status: 200 }),
+    );
+    const result = await refreshAfterVerify();
+    expect(result).toEqual({ token: 'fresh' });
   });
 });

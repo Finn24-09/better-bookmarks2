@@ -35,6 +35,23 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/email/, ''),
       },
+      // Metadata-fetcher service — exact-match route, must precede /api below.
+      // In dev, exposed on port 5002 via docker-compose.override.yml.
+      // Rewrite normalises both /api/title and /api/title/ to /title so dev
+      // matches production Nginx's `proxy_pass http://upstream/title;`
+      // behaviour exactly — the service's only route is POST /title and a
+      // trailing slash in the inbound URL would otherwise 404 the request.
+      //
+      // Adding a future endpoint under /api/title/ (favicon, preview, …)
+      // requires three coordinated edits: a new exact-match `location`
+      // block in docker/frontend/nginx.conf above the `^~ /api/title/`
+      // deny-wildcard, a new rewrite entry here (or an allow-list
+      // broadening of the regex), and the corresponding Fastify route.
+      '/api/title': {
+        target: 'http://localhost:5002',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/title\/?$/, '/title'),
+      },
       // Proxy /api/* → PostgREST at :3000 (strips the /api prefix)
       '/api': {
         target: 'http://localhost:3000',
