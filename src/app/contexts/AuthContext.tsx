@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { setAuthToken } from '../../lib/api';
 import { rotationStatus } from '../../lib/auth';
 import { resendVerificationEmail } from '../../lib/email';
@@ -103,20 +104,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (typeof payload.exp !== 'number' || payload.exp <= Math.floor(Date.now() / 1000)) return;
     if (payload.email_verified !== true) return;
-    setState((s) => {
-      if (typeof payload.sub !== 'string' || s.userId === null || payload.sub !== s.userId) {
-        return s;
-      }
-      // setAuthToken is called inside the functional updater so the
-      // sub-vs-userId check and the token install happen atomically against
-      // concurrent logout. React StrictMode invokes updaters twice in dev to
-      // surface impure reducers — that double-call is safe here because
-      // setAuthToken assigns to a module-level cache and is idempotent:
-      // setAuthToken(x) followed by setAuthToken(x) produces the same
-      // observable state as a single call. Production never double-calls.
-      setAuthToken(token);
-      return { ...s, token, emailVerified: true };
+    if (typeof payload.sub !== 'string') return;
+
+    // Sub-equality check runs INSIDE the updater so it reads the latest
+    // committed userId. The token install (setAuthToken) runs OUTSIDE,
+    // wrapped in flushSync so the updater has definitely committed by
+    // the time we inspect `accepted`. React 19 no longer guarantees the
+    // synchronous eager-state pass that earlier versions did, so a plain
+    // setState would queue the updater for reconciliation and leave
+    // `accepted` false at the post-setState check.
+    //
+    // Keeping the side-effect outside the reducer also closes a race
+    // present in the previous "setAuthToken inside the updater" shape:
+    // when a logout() lands in the same tick, React would re-invoke
+    // the updater during reconciliation AFTER logout's synchronous
+    // setAuthToken(null) had already run, re-installing the post-verify
+    // JWT into _token. Locking that property is the job of the race
+    // regression test in AuthContext.applyVerifiedToken.test.tsx.
+    let accepted = false;
+    flushSync(() => {
+      setState((s) => {
+        if (s.userId === null || payload.sub !== s.userId) return s;
+        accepted = true;
+        return { ...s, token, emailVerified: true };
+      });
     });
+    if (accepted) setAuthToken(token);
   }, []);
 
   const logout = useCallback(() => {
