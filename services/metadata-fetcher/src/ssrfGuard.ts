@@ -140,6 +140,13 @@ function checkAddress(addr: LookupAddress): { ok: true } | { ok: false } {
     return { ok: true };
   }
   if (!net.isIPv6(addr.address)) return { ok: false };
+  // Dotted-form IPv4-mapped IPv6 ('::ffff:127.0.0.1') is probed here for
+  // fine-grained `isIpv4Denied` logging only — this branch never returns
+  // `{ ok: true }`. The authoritative deny for every IPv6 address (including
+  // compressed-hex v4-mapped forms like `::ffff:7f00:1` and public-IPv4
+  // wraps like `::ffff:8.8.8.8`) is the wholesale `::ffff:0:0/96` entry in
+  // `IPV6_DENY`, applied by the `isIpv6Denied` call below. See `ipRanges.ts`
+  // IPV6_DENY comment for the dual-path rationale.
   const v4MappedMatch = addr.address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
   if (v4MappedMatch && IPV4_CANONICAL_RE.test(v4MappedMatch[1])) {
     const big = ipv4ToBigInt(v4MappedMatch[1]);
