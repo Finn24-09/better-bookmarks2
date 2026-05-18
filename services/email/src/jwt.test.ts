@@ -87,7 +87,13 @@ describe('verifyJwt', () => {
     await expect(verifyJwt(`Bearer ${token}`)).rejects.toMatchObject({ statusCode: 401 });
   });
 
-  it('H-4: accepts a token with correct aud=email-svc', async () => {
+  // Rolling-deploy regression: during a deploy in which some signers still
+  // emit the legacy single-string aud claim (`aud: 'email-svc'`) while
+  // others emit the multi-audience array (`aud: ['email-svc',
+  // 'metadata-svc']`), this service MUST continue to accept both shapes.
+  // Symmetric counterpart in services/metadata-fetcher/src/jwt.test.ts
+  // ('accepts a single-string aud=metadata-svc token').
+  it('H-4: accepts a single-string aud=email-svc token (rolling-deploy regression)', async () => {
     const token = await makeToken({ aud: 'email-svc' });
     const result = await verifyJwt(`Bearer ${token}`);
     expect(result.sub).toBe('00000000-0000-4000-8000-000000000001');
