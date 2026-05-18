@@ -80,6 +80,14 @@ export async function notifyPasswordChanged(): Promise<void> {
  * emits the wrong shape surfaces in dev tools without being masked by
  * the silent fallback. The same condition still returns null for the
  * caller — the breadcrumb is for ops, not UX.
+ *
+ * Deliberate carve-out from CLAUDE.md's "no console.log left in committed
+ * code" rule: that rule targets stray debug logging on user-flow paths.
+ * These three warns fire only on a server-contract violation (200 with
+ * the wrong body shape — a "should be impossible" path), carry no PII
+ * or token, and are pinned in place by regression tests in
+ * src/lib/email.test.ts. Removing them would erase the only signal that
+ * a backend redeploy started emitting the wrong shape.
  */
 export async function refreshAfterVerify(signal?: AbortSignal): Promise<{ token: string } | null> {
   let res: Response;

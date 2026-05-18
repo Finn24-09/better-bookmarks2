@@ -167,6 +167,26 @@ describe('refreshAfterVerify', () => {
     warnSpy.mockRestore();
   });
 
+  // Server returns a parseable JSON value that is null, an array, a number,
+  // or a string. Null / number / string fall into the non-object branch;
+  // array falls through (typeof [] === 'object') and lands on the
+  // missing-token branch. Either way the contract is the same: one warn,
+  // return null. Guards the silent-fallback contract against a server
+  // regression that swaps the success body shape.
+  it.each([
+    ['null body',     'null'],
+    ['array body',    '[]'],
+    ['number body',   '42'],
+    ['string body',   '"oops"'],
+  ])('returns null when the response body is %s (and leaves a console.warn breadcrumb)', async (_label, payload) => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(new Response(payload, { status: 200 }));
+    const result = await refreshAfterVerify();
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
   it('does NOT log a breadcrumb for legitimate failures (404 / 410 / network) — those are expected paths', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     fetchMock.mockResolvedValueOnce(new Response('', { status: 410 }));
