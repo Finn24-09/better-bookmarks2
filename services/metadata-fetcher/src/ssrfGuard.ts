@@ -21,9 +21,25 @@ import { ipv4ToBigInt, ipv6ToBigInt, isIpv4Denied, isIpv6Denied } from './ipRang
 //      trailing-dot, double-dot, null injection) by requiring the TLD to
 //      contain at least one letter, no labels of form `0x…` or `0\d+`.
 //   6. Port allowlist (scheme-default only — 80 for http, 443 for https).
-//   7. For IP literals (canonical IPv4 or bracketed IPv6) short-circuit DNS
-//      and consult the deny-list directly. For DNS-shaped hostnames, resolve
-//      all addresses, reject if ANY address is denied, dial the first.
+//   7. For IP literals (canonical IPv4 only — see IPv6 note below)
+//      short-circuit DNS and consult the deny-list directly. For
+//      DNS-shaped hostnames, resolve all addresses, reject if ANY
+//      address is denied, dial the first.
+//
+// IPv6 literal posture: bracketed IPv6 URLs (e.g.
+// http://[2606:4700:4700::1111]/) are rejected wholesale because
+// isCanonicalDnsHostname returns false for any hostname containing ':'.
+// This is a deliberate trade-off, not an oversight. Accepting IPv6
+// literals would require canonicalising zone IDs, scope IDs, IPv4-mapped
+// tail forms, and mixed compressed/expanded notations BEFORE the
+// deny-list lookup, and any normalisation gap reopens an SSRF bypass
+// class. DNS-shaped hostnames whose AAAA records resolve to global-
+// unicast IPv6 ARE reachable — checkAddress runs ipv6ToBigInt +
+// isIpv6Denied on the resolved address, and only the reserved /
+// loopback / link-local / multicast / NAT64 / 6to4 / v4-mapped /
+// documentation prefixes are blocked. The lost surface is therefore
+// only IPv6-only sites referenced by literal address, a rare
+// configuration in practice.
 // ---------------------------------------------------------------------------
 
 export type ValidationResult =
