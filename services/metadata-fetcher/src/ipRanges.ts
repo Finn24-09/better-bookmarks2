@@ -20,9 +20,13 @@ function ipv4ToBigInt(addr: string): bigint {
 function ipv4CidrRange(cidr: string, label: string): IpRange {
   const [addr, bitsStr] = cidr.split('/');
   const bits = Number(bitsStr);
-  if (!Number.isInteger(bits) || bits < 0 || bits > 32) throw new Error(`bad IPv4 CIDR: ${cidr}`);
+  // bits=0 produces a /0 mask covering the entire IPv4 space — silently
+  // turning a deny entry into "block everything", which would break every
+  // legitimate fetch destination. No caller uses /0 today; foreclose it
+  // explicitly so a future contributor cannot regress us by accident.
+  if (!Number.isInteger(bits) || bits < 1 || bits > 32) throw new Error(`bad IPv4 CIDR: ${cidr}`);
   const base = ipv4ToBigInt(addr);
-  const mask = bits === 0 ? 0n : (0xffffffffn << BigInt(32 - bits)) & 0xffffffffn;
+  const mask = (0xffffffffn << BigInt(32 - bits)) & 0xffffffffn;
   const start = base & mask;
   const end = start | (~mask & 0xffffffffn);
   return { start, end, label };
@@ -73,10 +77,12 @@ function ipv6ToBigInt(addr: string): bigint {
 function ipv6CidrRange(cidr: string, label: string): IpRange {
   const [addr, bitsStr] = cidr.split('/');
   const bits = Number(bitsStr);
-  if (!Number.isInteger(bits) || bits < 0 || bits > 128) throw new Error(`bad IPv6 CIDR: ${cidr}`);
+  // bits=0 produces a /0 mask covering the entire IPv6 space — see the
+  // ipv4CidrRange guard above for rationale. Mirror the floor here.
+  if (!Number.isInteger(bits) || bits < 1 || bits > 128) throw new Error(`bad IPv6 CIDR: ${cidr}`);
   const base = ipv6ToBigInt(addr);
   const fullMask = (1n << 128n) - 1n;
-  const mask = bits === 0 ? 0n : (fullMask << BigInt(128 - bits)) & fullMask;
+  const mask = (fullMask << BigInt(128 - bits)) & fullMask;
   const start = base & mask;
   const end = start | (~mask & fullMask);
   return { start, end, label };
