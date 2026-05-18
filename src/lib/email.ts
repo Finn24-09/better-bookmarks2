@@ -6,6 +6,7 @@ async function emailFetch(
   path: string,
   body?: Record<string, unknown>,
   auth = false,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (auth) {
@@ -17,6 +18,7 @@ async function emailFetch(
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
+    signal,
   });
 }
 
@@ -60,11 +62,18 @@ export async function notifyPasswordChanged(): Promise<void> {
  * calling /api/title/ without waiting for next sign-in.
  *
  * Returns null for any failure (410 expired window, 404 route not yet
- * deployed, network error, malformed body). Failure is non-fatal here
- * because the verification itself already succeeded — the user falls back
- * to the next-sign-in claim refresh path, which is the same behaviour they
- * would have if this route did not exist. The caller silently no-ops on
- * null; we never surface an error toast for this case.
+ * deployed, network error, AbortError from a cancelled in-flight request,
+ * malformed body). Failure is non-fatal here because the verification
+ * itself already succeeded — the user falls back to the next-sign-in
+ * claim refresh path, which is the same behaviour they would have if
+ * this route did not exist. The caller silently no-ops on null; we never
+ * surface an error toast for this case.
+ *
+ * The optional AbortSignal lets a caller cancel an in-flight request
+ * (e.g. on React effect cleanup after logout). The browser tears down
+ * the socket and fetch rejects with AbortError; the catch below maps
+ * any rejection — including AbortError — to null so callers see a
+ * uniform contract.
  *
  * A 200 response with an unexpected body shape leaves a console.warn
  * breadcrumb (no PII, no token) so a future server-side regression that
@@ -72,10 +81,10 @@ export async function notifyPasswordChanged(): Promise<void> {
  * the silent fallback. The same condition still returns null for the
  * caller — the breadcrumb is for ops, not UX.
  */
-export async function refreshAfterVerify(): Promise<{ token: string } | null> {
+export async function refreshAfterVerify(signal?: AbortSignal): Promise<{ token: string } | null> {
   let res: Response;
   try {
-    res = await emailFetch('/refresh-after-verify', {}, true);
+    res = await emailFetch('/refresh-after-verify', {}, true, signal);
   } catch {
     return null;
   }

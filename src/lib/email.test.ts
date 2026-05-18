@@ -179,3 +179,36 @@ describe('refreshAfterVerify', () => {
     warnSpy.mockRestore();
   });
 });
+
+describe('refreshAfterVerify AbortSignal', () => {
+  it('forwards the AbortSignal to fetch', async () => {
+    const controller = new AbortController();
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ token: 'fresh' }), { status: 200 }),
+    );
+
+    await refreshAfterVerify(controller.signal);
+
+    const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(opts.signal).toBe(controller.signal);
+  });
+
+  it('returns null when fetch rejects with AbortError (aborted request)', async () => {
+    // The wrapper catches all fetch rejections and maps to null; the
+    // AbortError name is incidental — the contract is "any rejection → null".
+    fetchMock.mockRejectedValueOnce(new Error('aborted'));
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await refreshAfterVerify(controller.signal);
+    expect(result).toBeNull();
+  });
+
+  it('with no signal still works (backwards-compatible)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ token: 'fresh' }), { status: 200 }),
+    );
+    const result = await refreshAfterVerify();
+    expect(result).toEqual({ token: 'fresh' });
+  });
+});

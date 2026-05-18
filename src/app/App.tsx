@@ -36,9 +36,12 @@ function useHashFragmentHandler() {
     // Guard against a late refreshAfterVerify resolution writing the
     // post-verify JWT back into auth state after the user has logged out
     // (router unmounts the home route → effect cleanup runs → cancelled=true).
-    // Without this, an in-flight refresh could partially resurrect a
-    // logged-out session.
+    // The AbortController tears down the in-flight HTTP request itself
+    // so the email service is not asked to mint a JWT for an abandoned
+    // session. `cancelled` stays as belt-and-suspenders for the case
+    // where the response arrived before the cleanup ran.
     let cancelled = false;
+    const controller = new AbortController();
 
     const hash = window.location.hash;
     if (!hash) return;
@@ -58,7 +61,7 @@ function useHashFragmentHandler() {
         // by design (route may be missing during a rolling deploy, or the
         // 5-minute window may have lapsed) — verification itself already
         // succeeded; the user falls back to next-sign-in refresh.
-        refreshAfterVerify().then((result) => {
+        refreshAfterVerify(controller.signal).then((result) => {
           if (cancelled || !result) return;
           applyVerifiedToken(result.token);
         });
@@ -71,7 +74,10 @@ function useHashFragmentHandler() {
       if (token) setDeleteToken(token);
     }
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [setEmailVerified, applyVerifiedToken]);
 
   return { deleteToken, clearDeleteToken: () => setDeleteToken(null) };
