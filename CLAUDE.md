@@ -117,6 +117,7 @@ When creating new features or modifying existing ones, hold the line on these. T
 - Follow the project's existing patterns — look at neighboring code before inventing a new convention
 - No unused exports, dead code, or orphaned tests
 - Comments explain the **why** (especially security invariants) — not the *what*; the code already shows the what
+- **No side-effects inside React `setState` updaters** — assignments, function calls, fetches, ref mutations all belong outside the updater. React may re-invoke the updater (StrictMode, concurrent rendering, batched dispatch reconciliation), making any in-updater side-effect a structural race (see issue #45 and PR #44, commit `5488389`). Enforced by ESLint (`no-restricted-syntax` in `eslint.config.js`) — the rule catches direct ExpressionStatements and one-level `if`-branch nesting; deeper conditional nesting and `AssignmentExpression`/`AwaitExpression`/`UpdateExpression` shapes still require manual review. Do not suppress this rule with `eslint-disable` without a security-reviewed justification — the in-updater shape was a real race in production, not a stylistic preference.
 
 ### Dependencies
 - `npm audit --audit-level=moderate` is a CI gate (all three packages). Fix vulnerabilities, don't suppress them
