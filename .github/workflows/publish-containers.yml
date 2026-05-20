@@ -25,6 +25,14 @@ on:
           - email
           - metadata-fetcher
           - db
+  # TEMPORARY: pre-merge smoke testing of this workflow on the feature
+  # branch. workflow_dispatch needs the workflow file on the default branch
+  # before it can be triggered (GitHub limitation), so we use a push trigger
+  # scoped to feat/ghcr-publishing for the rollout. REMOVE this block (and
+  # the matching `push` clause in the publish job's if-gate below) before
+  # merging to main.
+  push:
+    branches: [feat/ghcr-publishing]
 
 # Default-deny GITHUB_TOKEN. Per-job elevation only — see the publish job.
 permissions:
@@ -37,6 +45,7 @@ jobs:
     # an explicit workflow_dispatch. A failed bump never publishes.
     if: >
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
@@ -131,9 +140,13 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # workflow_dispatch and push (the TEMPORARY pre-merge trigger
+          # above) are operator-trusted: build the current ref's HEAD as-is.
+          # workflow_run carries the bump-commit verification.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+              || [ "${{ github.event_name }}" = "push" ]; then
             BUILD_SHA="$(git rev-parse HEAD)"
-            echo "workflow_dispatch: building ${BUILD_SHA}"
+            echo "${{ github.event_name }}: building ${BUILD_SHA}"
           else
             # Pick the OLDEST matching commit in (HEAD_SHA..origin/main] so we
             # always pin to the immediate child of HEAD_SHA, even if a later
