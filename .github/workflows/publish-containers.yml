@@ -278,8 +278,31 @@ jobs:
       # ── Sigstore-signed attestation pinned to the manifest-list digest ───
       # subject-digest MUST be the manifest-list digest (NOT a per-arch child)
       # so both linux/amd64 and linux/arm64 pulls verify cleanly. See spec H3.
-      - name: Attest build provenance
+      #
+      # GATE: attest-build-provenance does not work on private repositories on
+      # free GitHub plans. Skip it while the repo is private so the rest of
+      # the publish pipeline still runs; the step starts working automatically
+      # once the repo is flipped to public. Provenance metadata is still
+      # embedded in the image via `provenance: mode=max` in build-push-action
+      # above — that's an in-image attestation, distinct from the Sigstore
+      # signature this step would attach to the package separately.
+      - name: Check repo visibility
         if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        id: visibility
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRIVATE=$(gh api "/repos/${{ github.repository }}" --jq '.private')
+          echo "private=${PRIVATE}" >> "$GITHUB_OUTPUT"
+          if [ "$PRIVATE" = "true" ]; then
+            echo "::notice::Repo is private — skipping attest-build-provenance (free-plan limitation). Re-enable automatically once the repo is public."
+          fi
+
+      - name: Attest build provenance
+        if: >
+          steps.select.outputs.skip != 'true'
+          && steps.exists.outputs.skip != 'true'
+          && steps.visibility.outputs.private != 'true'
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ghcr.io/${{ steps.owner.outputs.lc }}/better-bookmarks2-${{ matrix.image }}
