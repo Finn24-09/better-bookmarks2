@@ -22,6 +22,8 @@ A self-hosted React bookmark manager with a dark glassmorphic design, backed by 
 ├── docker/db/                    # PostgREST database init SQL + Dockerfile
 ├── docker/frontend/              # Nginx reverse proxy + frontend Dockerfile
 └── .github/workflows/            # CI (audit, test, build) for all three packages
+                                  # plus publish-containers.yml (GHCR push on
+                                  # main after easy-versioning bump)
 ```
 
 ---
@@ -117,9 +119,10 @@ When creating new features or modifying existing ones, hold the line on these. T
 - Comments explain the **why** (especially security invariants) — not the *what*; the code already shows the what
 
 ### Dependencies
-- `npm audit --audit-level=moderate` is a CI gate (both packages). Fix vulnerabilities, don't suppress them
+- `npm audit --audit-level=moderate` is a CI gate (all three packages). Fix vulnerabilities, don't suppress them
 - Dependabot PRs already cover patch/minor updates — keep them flowing through review
 - Do not add a dependency to solve something the standard library / WebCrypto already does (see `src/lib/csv.ts` — RFC 4180 parser, no deps)
+- GHCR-pushed images are versioned from `package.json` and tagged via `publish-containers.yml`. Dev builds happen locally via `docker-compose.override.yml`. Operators consume the four `ghcr.io/finn24-09/better-bookmarks2-*` images; PostgREST is the only third-party image we pull.
 
 ---
 
@@ -412,15 +415,17 @@ fixed bottom-6 left-1/2 -translate-x-1/2 z-40
 
 ## Continuous Integration
 
-`.github/workflows/ci.yml` runs four jobs on every push to `main` and every PR:
-1. **webapp-security-audit** — `npm audit --audit-level=moderate` (frontend)
-2. **webapp-test-and-build** — `npm test` then `npm run build` (gated on audit)
-3. **email-security-audit** — same audit gate for `services/email/`
-4. **email-test-and-build** — `npm test` + `npm run build` for `services/email/`
+`.github/workflows/ci.yml` runs six audit + test/build jobs on every push to `main` and every PR — one audit and one test/build for each of `frontend`, `services/email/`, and `services/metadata-fetcher/` — plus a multi-arch `dockerfile-smoke-build` matrix job that PR-builds any Dockerfile whose context the PR touches.
 
-All Action versions are pinned to commit SHAs. `permissions: contents: read` is the default; jobs that need more elevate locally. Concurrency cancels superseded runs on the same ref.
+All Action versions are pinned to moving major tags (project convention — see `feedback_claude_action_pinning.md`). `permissions: contents: read` is the workflow-level default; jobs that need more elevate locally. Concurrency cancels superseded runs on the same ref.
 
-A separate `claude.yml` workflow handles on-demand PR review via `@claude` mentions (comment-only mode — see commit `597ad56d`).
+`.github/workflows/easy-versioning.yml` bumps `package.json` versions on push to `main` via the easy-versioning GitHub App, pushing a `chore(release): bump versions [skip ci]` commit.
+
+`.github/workflows/publish-containers.yml` chains off easy-versioning success via `workflow_run` and pushes the four self-built images (`frontend`, `email`, `metadata-fetcher`, `db`) to `ghcr.io/finn24-09/better-bookmarks2-*` with `<version>` and `latest` tags. Multi-arch (`amd64`+`arm64`), SPDX SBOM + in-toto build-provenance attestation via OIDC, digest-authoritative idempotency, per-image concurrency. Full threat model in `docs/superpowers/specs/2026-05-20-ghcr-container-publishing-design.md` (uncommitted by intent).
+
+`.github/workflows/claude.yml` handles on-demand PR review via `@claude` mentions (comment-only mode — see commit `597ad56d`).
+
+`docker-compose.yml` defaults to **pulling** the GHCR images. Developers continue to build locally via `docker-compose.override.yml`, which re-introduces the `build:` directives. Operators pin per-service versions via `BB2_VERSION`, `BB2_EMAIL_VERSION`, `BB2_METADATA_FETCHER_VERSION`, `BB2_DB_VERSION` in `.env` (see `.env.example`).
 
 ---
 

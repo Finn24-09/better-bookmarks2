@@ -138,6 +138,25 @@ These components are pulled as container images at deploy time rather than via `
 
 ---
 
+## CI & Release Pipeline (`.github/workflows/`)
+
+GitHub Actions used to test, audit, and publish container images.
+
+| Action                                                                                    | License    | Link                                              |
+| ----------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------- |
+| [actions/checkout](https://github.com/actions/checkout)                                   | MIT        | https://github.com/actions/checkout               |
+| [actions/setup-node](https://github.com/actions/setup-node)                               | MIT        | https://github.com/actions/setup-node             |
+| [actions/attest-build-provenance](https://github.com/actions/attest-build-provenance)     | MIT        | https://github.com/actions/attest-build-provenance |
+| [docker/setup-qemu-action](https://github.com/docker/setup-qemu-action)                   | Apache-2.0 | https://github.com/docker/setup-qemu-action       |
+| [docker/setup-buildx-action](https://github.com/docker/setup-buildx-action)               | Apache-2.0 | https://github.com/docker/setup-buildx-action     |
+| [docker/login-action](https://github.com/docker/login-action)                             | Apache-2.0 | https://github.com/docker/login-action            |
+| [docker/metadata-action](https://github.com/docker/metadata-action)                       | Apache-2.0 | https://github.com/docker/metadata-action         |
+| [docker/build-push-action](https://github.com/docker/build-push-action)                   | Apache-2.0 | https://github.com/docker/build-push-action       |
+| [Finn24-09/easy-versioning](https://github.com/Finn24-09/easy-versioning)                 | MIT        | https://github.com/Finn24-09/easy-versioning      |
+| [anthropics/claude-code-action](https://github.com/anthropics/claude-code-action)         | MIT        | https://github.com/anthropics/claude-code-action  |
+
+---
+
 ## Notes
 
 - This list is reviewed whenever a direct dependency is added to or removed from `package.json`, `services/email/package.json`, or `services/metadata-fetcher/package.json`. Transitive dependencies are not enumerated — see the respective `package-lock.json` files for the resolved tree.

@@ -149,8 +149,9 @@ Before requesting review, confirm:
 - [ ] 📝 Commit messages follow the [Commit Style](#-commit-style) above.
 - [ ] 📚 You updated docs (README, technical documentation, code comments) where behaviour changed.
 - [ ] 🔒 If you touched a security-relevant path, you re-checked the [Security Invariants](#-security-invariants).
+- [ ] 🐳 If you changed a `Dockerfile` or its build context, the PR-time `dockerfile-smoke-build` job for the affected image passes.
 
-CI runs `npm audit`, `npm test`, and `npm run build` for all three packages (frontend, email, metadata-fetcher). All four jobs must pass before merge.
+CI runs `npm audit`, `npm test`, and `npm run build` for all three packages (frontend, email, metadata-fetcher), plus a multi-arch `docker buildx build` smoke job for any Dockerfile whose context the PR touches. All jobs must pass before merge.
 
 ---
 
