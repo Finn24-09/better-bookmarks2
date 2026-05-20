@@ -1,7 +1,13 @@
+// This test does not live next to its source under test.
+// `eslint.config.mjs` sits at the project root (ESLint convention), but
+// `vite.config.ts`'s `test.include` glob is `src/**/*.test.{ts,tsx}` so
+// the test file must live under `src/`. `src/test/` is the project's
+// established home for config-level test suites (see `src/test/setup.ts`).
+
 import { describe, it, expect } from 'vitest';
 import { ESLint } from 'eslint';
 
-// Drive the real eslint.config.js so the test asserts production behaviour,
+// Drive the real eslint.config.mjs so the test asserts production behaviour,
 // not a fixture config. `cwd` defaults to process.cwd(); vitest runs from
 // the project root so the workspace config is picked up.
 const eslint = new ESLint();
@@ -92,6 +98,55 @@ describe('no-restricted-syntax: side-effects inside React setState updaters', ()
     expect(result.errorCount).toBe(1);
   });
 
+  it('flags an unbraced if-branch side-effect (no BlockStatement wrapper)', async () => {
+    // PR #63 review item 1: AST is IfStatement > ExpressionStatement
+    // directly (no BlockStatement hop). The original two selectors
+    // missed this; Selector 3 closes the gap.
+    const code = `
+      function Comp() {
+        setState((s) => {
+          if (s.userId === sub) setAuthToken(token);
+          return s;
+        });
+      }
+    `;
+    const result = await lint(code);
+    expect(result.errorCount).toBe(1);
+    expect(result.messages[0].message).toMatch(/setState.*updater/);
+  });
+
+  it('flags an unbraced else-branch side-effect', async () => {
+    const code = `
+      function Comp() {
+        setState((s) => {
+          if (s.userId === sub) return s;
+          else setAuthToken(token);
+          return s;
+        });
+      }
+    `;
+    const result = await lint(code);
+    expect(result.errorCount).toBe(1);
+  });
+
+  it('flags two violations when braced consequent + unbraced alternate both contain side-effects', async () => {
+    // Selectors 2 and 3 are mutually exclusive on the same node but
+    // can fire on different nodes within the same if/else — pin the
+    // behaviour so a future selector consolidation does not silently
+    // change it.
+    const code = `
+      function Comp() {
+        setState((s) => {
+          if (s.userId === sub) { sideEffect(); }
+          else doOther();
+          return s;
+        });
+      }
+    `;
+    const result = await lint(code);
+    expect(result.errorCount).toBe(2);
+  });
+
   // -------- NEGATIVE: rule MUST NOT fire --------
 
   it('does NOT flag a pure expression-body updater', async () => {
@@ -148,9 +203,12 @@ describe('no-restricted-syntax: side-effects inside React setState updaters', ()
     expect(result.errorCount).toBe(0);
   });
 
-  it('does NOT flag setTimeout with an inner if-statement (the BookmarkFormModal shape)', async () => {
+  it('does NOT flag setTimeout with an unbraced inner if-statement (the BookmarkFormModal shape)', async () => {
     // BookmarkFormModal.tsx:128 uses setTimeout(() => { if (...) setAutoTitlePhase("idle"); }, 600).
-    // Both selectors must skip it via the timer-function exclusion.
+    // The inner if-statement is unbraced (single ExpressionStatement consequent),
+    // so this covers BOTH the braced-if and unbraced-if (Selectors 2 and 3)
+    // timer-exclusion paths — all three selectors must skip it at the outer
+    // callee level via SETTER_NAME_RE.
     const code = `
       function Comp() {
         setTimeout(() => {
