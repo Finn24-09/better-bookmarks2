@@ -1,0 +1,55 @@
+name: Feature request
+description: Suggest a new feature or enhancement
+title: "[Feature] <short description>"
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. For anything non-trivial, please wait for maintainer feedback before starting implementation — this avoids wasted work if the design needs adjustment.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I have searched [existing issues and discussions](https://github.com/Finn24-09/better-bookmarks2/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: This proposal does not weaken any of the security invariants documented in CONTRIBUTING.md (or it does, and I have explained why the trade-off is worth it).
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve? Who experiences it, and how often?
+      placeholder: "Power users with thousands of bookmarks cannot reliably find one by partial URL — current search only matches the title."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed solution
+      description: What change would solve the problem? Sketch the UX or the API surface as concretely as you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider, and why did you discard them?
+
+  - type: textarea
+    id: encryption
+    attributes:
+      label: Encryption / zero-knowledge impact
+      description: Does this require the server to see plaintext, or to gain access to a field it currently cannot decrypt? If yes, explain why that trade-off is acceptable.
+      placeholder: "No — search runs entirely client-side, after decryption."
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Mockups, links to similar features in other projects, or anything else.

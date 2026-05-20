@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability report
+    url: https://github.com/Finn24-09/better-bookmarks2/security/advisories/new
+    about: Report a security vulnerability privately via GitHub Security Advisories. Do NOT open a public issue for security bugs — see SECURITY.md for the full policy.
+  - name: Question or general discussion
+    url: https://github.com/Finn24-09/better-bookmarks2/discussions
+    about: For usage questions, deployment help, or open-ended discussion, please use Discussions rather than an issue.

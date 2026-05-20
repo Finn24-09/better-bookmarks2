@@ -1,0 +1,114 @@
+name: Bug report
+description: Report a reproducible bug in Better Bookmarks 2
+title: "[Bug] <short description>"
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report.
+
+        **Security issue?** Do not file it here — follow [SECURITY.md](https://github.com/Finn24-09/better-bookmarks2/blob/main/SECURITY.md) and report it privately via the Security tab. Public disclosure before a fix puts every self-hosted instance at risk.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      description: Please confirm the following before opening the issue.
+      options:
+        - label: I have searched [existing issues](https://github.com/Finn24-09/better-bookmarks2/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I am running the latest tagged release (or `main` at a known commit), not an older fork.
+          required: true
+        - label: This is not a security vulnerability. (If it is, I will close this and use the Security tab instead.)
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences describing what is broken.
+      placeholder: "Bookmarks created with empty tags fail with a 400 from PostgREST."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps to reproduce. Include any relevant request bodies, console output, or network responses (with secrets redacted).
+      placeholder: |
+        1. Sign in as a fresh user
+        2. Open Add Bookmark
+        3. Enter title "Example" and URL "https://example.com" with no tags
+        4. Click Save
+        5. PostgREST returns HTTP 400 with body `{ "code": "23502", ... }`
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `git rev-parse HEAD` for source builds, or the tagged release version.
+      placeholder: "v26.5.18-2 or commit bd36bf4a"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      multiple: true
+      options:
+        - Frontend (React app)
+        - Email service
+        - Metadata-fetcher service
+        - PostgreSQL schema / RLS / RPCs
+        - Nginx reverse proxy
+        - Docker Compose / deployment
+        - CI workflows
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser (frontend bugs only)
+      description: Name and version. Skip for backend-only bugs.
+      placeholder: "Firefox 142, Chrome 145, Safari 18.2"
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Anything else relevant about how you are running the stack.
+      placeholder: |
+        - Self-hosted on Linux / Docker 28.x
+        - Behind Caddy with TLS termination
+        - PostgreSQL 16.4
+        - SMTP via AWS SES eu-west-1
+      render: markdown
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Container / browser console output. **Redact bearer tokens, reset tokens, JWTs, passwords, and email addresses other than your own.**
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Screenshots, hypotheses, or anything else that might help.

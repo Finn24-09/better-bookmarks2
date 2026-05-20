@@ -2,9 +2,11 @@
 
 Better Bookmarks 2 is built on the shoulders of many excellent open-source projects. Thank you to every author and contributor listed below.
 
+Only direct runtime and development dependencies are listed here. Each project keeps its full license text in its own repository at the link provided.
+
 ---
 
-## UI & Components
+## Frontend — UI & Components
 
 | Package                                                                               | License | Link                                                      |
 | ------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------- |
@@ -26,7 +28,7 @@ Better Bookmarks 2 is built on the shoulders of many excellent open-source proje
 
 ---
 
-## Forms & Routing
+## Frontend — Forms & Routing
 
 | Package                                         | License | Link                                               |
 | ----------------------------------------------- | ------- | -------------------------------------------------- |
@@ -36,7 +38,7 @@ Better Bookmarks 2 is built on the shoulders of many excellent open-source proje
 
 ---
 
-## Drag & Drop
+## Frontend — Drag & Drop
 
 | Package                                                           | License | Link                                   |
 | ----------------------------------------------------------------- | ------- | -------------------------------------- |
@@ -45,7 +47,7 @@ Better Bookmarks 2 is built on the shoulders of many excellent open-source proje
 
 ---
 
-## Data & Utilities
+## Frontend — Data & Utilities
 
 | Package                                                     | License    | Link                                      |
 | ----------------------------------------------------------- | ---------- | ----------------------------------------- |
@@ -57,7 +59,7 @@ Better Bookmarks 2 is built on the shoulders of many excellent open-source proje
 
 ---
 
-## Styling
+## Frontend — Styling
 
 | Package                                                         | License | Link                                          |
 | --------------------------------------------------------------- | ------- | --------------------------------------------- |
@@ -66,7 +68,7 @@ Better Bookmarks 2 is built on the shoulders of many excellent open-source proje
 
 ---
 
-## Build Tooling
+## Frontend — Build Tooling
 
 | Package                                                             | License | Link                                        |
 | ------------------------------------------------------------------- | ------- | ------------------------------------------- |
@@ -76,7 +78,7 @@ Better Bookmarks 2 is built on the shoulders of many excellent open-source proje
 
 ---
 
-## Testing
+## Frontend — Testing
 
 | Package                                                     | License | Link                                                     |
 | ----------------------------------------------------------- | ------- | -------------------------------------------------------- |
@@ -85,3 +87,59 @@ Better Bookmarks 2 is built on the shoulders of many excellent open-source proje
 | [@testing-library/react](https://testing-library.com/)      | MIT     | https://github.com/testing-library/react-testing-library |
 | [@testing-library/jest-dom](https://testing-library.com/)   | MIT     | https://github.com/testing-library/jest-dom              |
 | [@testing-library/user-event](https://testing-library.com/) | MIT     | https://github.com/testing-library/user-event            |
+
+---
+
+## Email Service (`services/email/`)
+
+| Package                                                                 | License    | Link                                        |
+| ----------------------------------------------------------------------- | ---------- | ------------------------------------------- |
+| [Fastify](https://fastify.dev/)                                         | MIT        | https://github.com/fastify/fastify          |
+| [@fastify/cookie](https://github.com/fastify/fastify-cookie)            | MIT        | https://github.com/fastify/fastify-cookie   |
+| [@fastify/rate-limit](https://github.com/fastify/fastify-rate-limit)    | MIT        | https://github.com/fastify/fastify-rate-limit |
+| [jose](https://github.com/panva/jose)                                   | MIT        | https://github.com/panva/jose               |
+| [Nodemailer](https://nodemailer.com/)                                   | MIT-0      | https://github.com/nodemailer/nodemailer    |
+| [node-postgres (`pg`)](https://node-postgres.com/)                      | MIT        | https://github.com/brianc/node-postgres     |
+| [Zod](https://zod.dev/)                                                 | MIT        | https://github.com/colinhacks/zod           |
+| [TypeScript](https://www.typescriptlang.org/) (dev)                     | Apache-2.0 | https://github.com/microsoft/TypeScript     |
+| [tsx](https://tsx.is/) (dev)                                            | MIT        | https://github.com/privatenumber/tsx        |
+| [Vitest](https://vitest.dev/) (dev)                                     | MIT        | https://github.com/vitest-dev/vitest        |
+
+---
+
+## Metadata-Fetcher Service (`services/metadata-fetcher/`)
+
+| Package                                                                 | License        | Link                                          |
+| ----------------------------------------------------------------------- | -------------- | --------------------------------------------- |
+| [Fastify](https://fastify.dev/)                                         | MIT            | https://github.com/fastify/fastify            |
+| [@fastify/rate-limit](https://github.com/fastify/fastify-rate-limit)    | MIT            | https://github.com/fastify/fastify-rate-limit |
+| [htmlparser2](https://github.com/fb55/htmlparser2)                      | MIT            | https://github.com/fb55/htmlparser2           |
+| [entities](https://github.com/fb55/entities)                            | BSD-2-Clause   | https://github.com/fb55/entities              |
+| [jose](https://github.com/panva/jose)                                   | MIT            | https://github.com/panva/jose                 |
+| [prom-client](https://github.com/siimon/prom-client)                    | Apache-2.0     | https://github.com/siimon/prom-client         |
+| [Zod](https://zod.dev/)                                                 | MIT            | https://github.com/colinhacks/zod             |
+| [TypeScript](https://www.typescriptlang.org/) (dev)                     | Apache-2.0     | https://github.com/microsoft/TypeScript       |
+| [tsx](https://tsx.is/) (dev)                                            | MIT            | https://github.com/privatenumber/tsx          |
+| [Vitest](https://vitest.dev/) (dev)                                     | MIT            | https://github.com/vitest-dev/vitest          |
+
+---
+
+## Infrastructure & Runtime
+
+These components are pulled as container images at deploy time rather than via `npm`, but the project would not exist without them.
+
+| Component                                       | License                | Link                                     |
+| ----------------------------------------------- | ---------------------- | ---------------------------------------- |
+| [PostgreSQL](https://www.postgresql.org/)       | PostgreSQL License     | https://github.com/postgres/postgres     |
+| [PostgREST](https://postgrest.org/)             | MIT                    | https://github.com/PostgREST/postgrest   |
+| [Nginx](https://nginx.org/)                     | BSD-2-Clause           | https://github.com/nginx/nginx           |
+| [Node.js](https://nodejs.org/)                  | MIT                    | https://github.com/nodejs/node           |
+| [pgcrypto](https://www.postgresql.org/docs/current/pgcrypto.html) | PostgreSQL License | https://github.com/postgres/postgres/tree/master/contrib/pgcrypto |
+
+---
+
+## Notes
+
+- This list is reviewed whenever a direct dependency is added to or removed from `package.json`, `services/email/package.json`, or `services/metadata-fetcher/package.json`. Transitive dependencies are not enumerated — see the respective `package-lock.json` files for the resolved tree.
+- License identifiers use SPDX short identifiers where possible.
+- If you believe a project should be listed here and is not, please open an issue or pull request.
