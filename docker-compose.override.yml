@@ -1,20 +1,41 @@
 # Development overrides — applied automatically by `docker compose up`.
-# Production deployments must use `docker compose -f docker-compose.yml up -d`.
+#
+# Effect: re-introduces the `build:` directives so developers continue to
+# build images locally. When both `image:` (from docker-compose.yml) and
+# `build:` (here) are present, `docker compose build` tags the local build
+# with the `image:` name, and `docker compose up` prefers the local image
+# over a remote pull.
+#
+# Production deployments must skip this file:
+#   docker compose -f docker-compose.yml up -d
 
 services:
   db:
     build:
+      context: ./docker/db
+      dockerfile: Dockerfile
       target: dev          # includes pgTAP for database unit tests
 
   postgrest:
     ports:
       - "3000:3000"        # expose for Vite dev proxy (npm run dev)
 
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+
   email-service:
+    build:
+      context: ./services/email
+      dockerfile: Dockerfile
     ports:
       - "5001:5001"  # expose for Vite dev proxy (npm run dev)
 
   metadata-fetcher:
+    build:
+      context: ./services/metadata-fetcher
+      dockerfile: Dockerfile
     ports:
       - "5002:5002"  # expose for Vite dev proxy (npm run dev)
 

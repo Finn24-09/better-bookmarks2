@@ -31,7 +31,7 @@ Your data never leaves your browser unencrypted — the server only ever sees ci
 <br><br>
 
 <sub>
-  <a href="#-why">✨ Why</a> · <a href="#-features">🎯 Features</a> · <a href="#-security-model">🔒 Security</a> · <a href="#-quick-start">🚀 Quick Start</a> · <a href="#-self-hosting">🐳 Self-Hosting</a> · <a href="#-local-development">💻 Development</a> · <a href="#-tech-stack">🧰 Tech Stack</a> · <a href="#-community">🤝 Community</a>
+  <a href="#-why">✨ Why</a> · <a href="#-features">🎯 Features</a> · <a href="#-security-model">🔒 Security</a> · <a href="#-quick-start">🚀 Quick Start</a> · <a href="#-self-hosting">🐳 Self-Hosting</a> · <a href="#-pinning-images--verifying-attestations">🔐 Pinning</a> · <a href="#-local-development">💻 Development</a> · <a href="#-tech-stack">🧰 Tech Stack</a> · <a href="#-community">🤝 Community</a>
 </sub>
 
 </div>
@@ -199,18 +199,19 @@ Stateless server-side `<title>` extraction for the Add Bookmark auto-fill button
 git clone https://github.com/Finn24-09/better-bookmarks2.git
 cd better-bookmarks2
 cp .env.example .env        # fill in the values — see Self-Hosting below
+docker compose -f docker-compose.yml pull
 docker compose -f docker-compose.yml up -d
 ```
 
 🎉 Open **http://localhost:80** once the containers are healthy.
 
-The `-f docker-compose.yml` flag is required to skip `docker-compose.override.yml`, which contains development-only port forwards.
+The `-f docker-compose.yml` flag is required to skip `docker-compose.override.yml`, which switches the four self-built services from prebuilt GHCR images to local builds (and exposes dev-only ports). `.env.example` ships with **pinned** image versions, so the first `pull` fetches a deterministic set of digests — bumping is a deliberate operator action, never an unattended `latest` drift. See [🔐 Pinning images & verifying attestations](#-pinning-images--verifying-attestations).
 
 ---
 
 ## 🐳 Self-Hosting
 
-The recommended way to self-host is with **Docker Compose**. The repository ships everything you need: a multi-stage `Dockerfile` for the frontend, an Nginx config with full security headers and rate limits, both Fastify microservices, a hardened PostgreSQL image with the schema pre-applied, and a `docker-compose.yml` that wires it all together on isolated bridge networks.
+The recommended way to self-host is with **Docker Compose**. The `docker-compose.yml` in this repository pulls four prebuilt, multi-arch images (`linux/amd64` + `linux/arm64`) from GitHub Container Registry — the frontend (Nginx + the built SPA, with security headers and rate limits), the two Fastify microservices, and a hardened PostgreSQL with the schema pre-applied — plus the upstream PostgREST image, all wired together on isolated bridge networks. Each release is signed via Sigstore attestation through GitHub OIDC; see [🔐 Pinning images & verifying attestations](#-pinning-images--verifying-attestations).
 
 ### 1️⃣ Configure environment
 
@@ -251,18 +252,100 @@ docker compose -f docker-compose.yml up -d
 
 ### 3️⃣ Container topology
 
-| Container               | Role                                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- |
-| 🌐 **frontend**         | Nginx — serves the built React app, applies security headers + rate limits, proxies `/api/*`         |
-| 🛢️ **postgrest**        | PostgREST v12 — exposes the `api` schema; pre-request hook validates the JWT `tv` claim              |
-| 📧 **email-service**    | Fastify + Node 22 — token issuance / redemption, SMTP delivery; scoped `email_svc` DB role           |
-| 🔗 **metadata-fetcher** | Fastify + Node 22 — stateless server-side `<title>` extraction; SSRF-hardened, no DB role            |
-| 🗄️ **db**               | PostgreSQL 16 — schema, RLS policies, and SECURITY DEFINER auth helpers pre-applied via init scripts |
+| Container               | Image                                                          | Role                                                                                                 |
+| ----------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 🌐 **frontend**         | `ghcr.io/finn24-09/better-bookmarks2-frontend`                 | Nginx — serves the built React app, applies security headers + rate limits, proxies `/api/*`         |
+| 🛢️ **postgrest**        | `postgrest/postgrest:v12.2.3` (upstream)                       | PostgREST v12 — exposes the `api` schema; pre-request hook validates the JWT `tv` claim              |
+| 📧 **email-service**    | `ghcr.io/finn24-09/better-bookmarks2-email`                    | Fastify + Node 22 — token issuance / redemption, SMTP delivery; scoped `email_svc` DB role           |
+| 🔗 **metadata-fetcher** | `ghcr.io/finn24-09/better-bookmarks2-metadata-fetcher`         | Fastify + Node 22 — stateless server-side `<title>` extraction; SSRF-hardened, no DB role            |
+| 🗄️ **db**               | `ghcr.io/finn24-09/better-bookmarks2-db`                       | PostgreSQL 16 — schema, RLS policies, and SECURITY DEFINER auth helpers pre-applied via init scripts |
 
 🔒 PostgreSQL data is persisted in a named Docker volume. PostgREST, the email service, and the metadata-fetcher are **never exposed publicly** — only the frontend listens on port 80.
 
+The four `ghcr.io/finn24-09/...` images are built and pushed automatically from `main` after each release. See [🔐 Pinning images & verifying attestations](#-pinning-images--verifying-attestations) for how to pin to a specific version and confirm the signature.
+
 > [!NOTE]
 > Run the stack behind a reverse proxy that terminates TLS in production. The Nginx config already emits HSTS, so it expects to be served over HTTPS on its public hostname.
+
+---
+
+## 🔐 Pinning images & verifying attestations
+
+The four GHCR images in the topology table are tagged with both a `<version>` and a floating `latest`. `.env.example` ships with explicit pins — bumping is always a deliberate operator action, never an unattended drift to `latest`.
+
+### 📌 Why pin
+
+- 🪪 **Reproducibility.** A specific commit ↔ a specific digest you can verify and audit.
+- 🛑 **No surprise upgrades.** Every restart pulls the same digest until you choose otherwise.
+- 🛡️ **Verifiable provenance.** Each pinned version has a Sigstore-signed attestation produced by the GitHub OIDC token of the publishing workflow.
+
+### 📋 The four pin variables
+
+Set these in your `.env` (or override the defaults in `.env.example`):
+
+| Variable                       | Image                                                       |
+| ------------------------------ | ----------------------------------------------------------- |
+| `BB2_VERSION`                  | `ghcr.io/finn24-09/better-bookmarks2-frontend`              |
+| `BB2_EMAIL_VERSION`            | `ghcr.io/finn24-09/better-bookmarks2-email`                 |
+| `BB2_METADATA_FETCHER_VERSION` | `ghcr.io/finn24-09/better-bookmarks2-metadata-fetcher`      |
+| `BB2_DB_VERSION`               | `ghcr.io/finn24-09/better-bookmarks2-db`                    |
+
+Browse published versions:
+
+- 🌐 [better-bookmarks2-frontend](https://github.com/Finn24-09/better-bookmarks2/pkgs/container/better-bookmarks2-frontend)
+- 📧 [better-bookmarks2-email](https://github.com/Finn24-09/better-bookmarks2/pkgs/container/better-bookmarks2-email)
+- 🔗 [better-bookmarks2-metadata-fetcher](https://github.com/Finn24-09/better-bookmarks2/pkgs/container/better-bookmarks2-metadata-fetcher)
+- 🗄️ [better-bookmarks2-db](https://github.com/Finn24-09/better-bookmarks2/pkgs/container/better-bookmarks2-db)
+
+### ✅ Verifying the attestation (recommended before a fresh deploy)
+
+Each push to GHCR is signed by the `publish-containers.yml` workflow via the GitHub OIDC issuer. Verify with `gh attestation verify`:
+
+```bash
+gh attestation verify oci://ghcr.io/finn24-09/better-bookmarks2-frontend:<version> \
+  --repo Finn24-09/better-bookmarks2 \
+  --signer-workflow Finn24-09/better-bookmarks2/.github/workflows/publish-containers.yml
+```
+
+> [!WARNING]
+> `gh attestation verify --owner finn24-09` (without `--repo` / `--signer-workflow`) is **insufficient** — it would accept attestations from any workflow under the owner namespace. Always use the pinned form above.
+
+`cosign` users can verify against the exact certificate identity:
+
+```bash
+cosign verify-attestation \
+  --certificate-identity 'https://github.com/Finn24-09/better-bookmarks2/.github/workflows/publish-containers.yml@refs/heads/main' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/finn24-09/better-bookmarks2-frontend:<version>
+```
+
+### 🔍 Forensics: "given a deployed digest, which commit produced this image?"
+
+```bash
+docker inspect <container> --format '{{.Image}}'   # → sha256:<digest>
+```
+
+Then open the GHCR package page for the relevant image, find the version whose digest matches, click "Build provenance" → the workflow run links back to the source commit. Alternatively:
+
+```bash
+gh attestation verify oci://ghcr.io/finn24-09/better-bookmarks2-<svc>@sha256:<digest> \
+  --repo Finn24-09/better-bookmarks2 \
+  --signer-workflow Finn24-09/better-bookmarks2/.github/workflows/publish-containers.yml \
+  --format json | jq -r '.[0].verificationResult.signature.certificate.githubWorkflowSha'
+```
+
+> [!NOTE]
+> GHCR tags can be re-pointed if a package version is deleted (the registry does not enforce post-deletion immutability). If you need cryptographic immutability for an auditable production deploy, pin the image by **digest** (`@sha256:…`) instead of by tag.
+
+### 🔄 Updating to a newer release
+
+```bash
+# Bump the BB2_*_VERSION values in your .env, then:
+docker compose -f docker-compose.yml pull
+docker compose -f docker-compose.yml up -d
+```
+
+Avoid `--pull always` — it bypasses operator review of new digests on every restart.
 
 ---
 
@@ -277,7 +360,9 @@ docker compose -f docker-compose.yml up -d
 ### ⚙️ Setup
 
 ```bash
-# 1. Bring up the backend (uses docker-compose.override.yml — exposes ports for Vite proxy)
+# 1. Bring up the backend. `docker compose up` automatically applies
+#    docker-compose.override.yml, which re-introduces local `build:` directives
+#    (overriding the GHCR images) and exposes ports for the Vite proxy.
 docker compose up -d
 
 # 2. Install and start the frontend dev server
@@ -326,6 +411,10 @@ GitHub Actions runs six jobs on every push and pull request to `main`:
 2. 🏗️ `webapp-test-and-build` — `npm ci && npm test && npm run build`
 3. 📧 `email-security-audit` + `email-test-and-build`
 4. 🔗 `metadata-fetcher-security-audit` + `metadata-fetcher-test-and-build`
+
+PRs that change a `Dockerfile` or its build context also trigger a matrix `dockerfile-smoke-build` job that runs a multi-arch `docker buildx build` (no push) per affected image, catching Dockerfile regressions before main.
+
+A separate `publish-containers.yml` workflow chains off the `easy-versioning` workflow's success on `main` and pushes the four self-built images to GHCR with `<version>` and `latest` tags, including SBOM and Sigstore-signed build-provenance attestations. This workflow only fires on `main` after a successful version bump.
 
 A green CI badge at the top of this README means every job passed on `main`. Dependabot patches and minor updates are bundled weekly; React, Vite, and Tailwind majors get isolated PRs for careful review.
 

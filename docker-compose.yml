@@ -13,12 +13,16 @@ networks:
     driver: bridge
     internal: false
 
+# Production default: pull prebuilt images from GHCR. Developers continue to
+# build locally via the build: directives in docker-compose.override.yml.
+#
+# Operators pin specific versions per service via the four BB2_*_VERSION env
+# vars (see .env.example). The :-latest fallback exists only as a misconfig
+# safety net — .env.example ships with explicit pins, not latest, because
+# floating to latest silently bypasses operator review of new digests.
 services:
   db:
-    build:
-      context: ./docker/db
-      dockerfile: Dockerfile
-      target: production
+    image: ghcr.io/finn24-09/better-bookmarks2-db:${BB2_DB_VERSION:-latest}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -86,9 +90,7 @@ services:
       - betterbookmarks2
 
   frontend:
-    build:
-      context: .
-      dockerfile: docker/frontend/Dockerfile
+    image: ghcr.io/finn24-09/better-bookmarks2-frontend:${BB2_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       - postgrest
@@ -127,9 +129,7 @@ services:
       - metadata_net          # nginx reverse-proxies /api/title/ to metadata-fetcher
 
   email-service:
-    build:
-      context: ./services/email
-      dockerfile: Dockerfile
+    image: ghcr.io/finn24-09/better-bookmarks2-email:${BB2_EMAIL_VERSION:-latest}
     container_name: bb2-email
     restart: unless-stopped
     env_file: .env
@@ -177,9 +177,7 @@ services:
       start_period: 15s
 
   metadata-fetcher:
-    build:
-      context: ./services/metadata-fetcher
-      dockerfile: Dockerfile
+    image: ghcr.io/finn24-09/better-bookmarks2-metadata-fetcher:${BB2_METADATA_FETCHER_VERSION:-latest}
     container_name: bb2-metadata-fetcher
     restart: unless-stopped
     env_file: .env

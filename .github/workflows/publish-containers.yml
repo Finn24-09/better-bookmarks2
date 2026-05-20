@@ -1,0 +1,308 @@
+name: publish-containers
+
+# Build & push the four self-built images to GHCR after easy-versioning has
+# landed a `chore(release): bump versions [skip ci]` commit on main. Triggered
+# via workflow_run so the [skip ci] in the bump commit does NOT suppress us.
+#
+# Design rationale, threat model, and operator runbooks live in:
+#   docs/superpowers/specs/2026-05-20-ghcr-container-publishing-design.md
+# (uncommitted by intent; see the spec for why).
+
+on:
+  workflow_run:
+    workflows: ["easy-versioning"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Only build this image (frontend|email|metadata-fetcher|db|all)"
+        type: choice
+        default: all
+        options:
+          - all
+          - frontend
+          - email
+          - metadata-fetcher
+          - db
+
+# Default-deny GITHUB_TOKEN. Per-job elevation only — see the publish job.
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build & push ${{ matrix.image }}
+    # Only run on a successful easy-versioning completion against main, or on
+    # an explicit workflow_dispatch. A failed bump never publishes.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read         # checkout
+      packages: write        # push to GHCR (owner-wide — narrowed by repo→package link, see spec §8)
+      id-token: write        # OIDC token for Sigstore attestation
+      attestations: write    # write the attestation back to the package
+
+    strategy:
+      # Per-image isolation: one matrix entry's failure does not cancel others.
+      # Combined with the per-image concurrency group below, this also lets two
+      # independent images publish in parallel.
+      fail-fast: false
+      matrix:
+        include:
+          - image: frontend
+            context: .
+            dockerfile: docker/frontend/Dockerfile
+            version_file: package.json
+            target: ""
+          - image: email
+            context: services/email
+            dockerfile: services/email/Dockerfile
+            version_file: services/email/package.json
+            target: ""
+          - image: metadata-fetcher
+            context: services/metadata-fetcher
+            dockerfile: services/metadata-fetcher/Dockerfile
+            version_file: services/metadata-fetcher/package.json
+            target: ""
+          - image: db
+            context: docker/db
+            dockerfile: docker/db/Dockerfile
+            version_file: package.json
+            target: production
+
+    concurrency:
+      # Per-image, per-ref. Prevents two simultaneous publishes of the same
+      # image from racing the digest check; allows different images to publish
+      # in parallel. cancel-in-progress: false — never abort a half-finished push.
+      group: publish-containers-${{ matrix.image }}-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      # ── Skip non-matching matrix entries on filtered workflow_dispatch ───
+      - name: Skip if not selected
+        id: select
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+              && [ "${{ inputs.image }}" != "all" ] \
+              && [ "${{ inputs.image }}" != "${{ matrix.image }}" ]; then
+            echo "Skipping ${{ matrix.image }} (workflow_dispatch filtered to ${{ inputs.image }})"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Defence in depth: refuse to run if the workflow file itself
+      # contains `secrets:` or `secret-files:` inputs to build-push-action.
+      # Combined with CODEOWNERS on .github/workflows/, this makes the
+      # spec's §11.2 build-secrets hard rule actually load-bearing.
+      - name: Checkout (workflow-file sanity check)
+        if: steps.select.outputs.skip != 'true'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
+
+      - name: Forbid build-time secrets
+        if: steps.select.outputs.skip != 'true'
+        run: |
+          if grep -nE '^\s*(secrets|secret-files)\s*:' .github/workflows/publish-containers.yml; then
+            echo "::error::publish-containers.yml contains 'secrets:' or 'secret-files:' inputs — see spec §11.2"
+            exit 1
+          fi
+
+      # ── Resolve the commit to build ──────────────────────────────────────
+      # workflow_run: walk from head_sha to find the immediate easy-versioning
+      # bump commit and verify its author + parent. Aborts if anything looks off
+      # (per spec §4.1) so an attacker cannot substitute a follow-up commit's
+      # tree into a tag for a prior bump's version.
+      #
+      # workflow_dispatch: operator-trusted, just use the current ref's HEAD.
+      - name: Fetch full history (workflow_run only)
+        if: steps.select.outputs.skip != 'true' && github.event_name == 'workflow_run'
+        run: git fetch --depth=50 origin main
+
+      - name: Resolve bump commit
+        id: bump
+        if: steps.select.outputs.skip != 'true'
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BUILD_SHA="$(git rev-parse HEAD)"
+            echo "workflow_dispatch: building ${BUILD_SHA}"
+          else
+            # Pick the OLDEST matching commit in (HEAD_SHA..origin/main] so we
+            # always pin to the immediate child of HEAD_SHA, even if a later
+            # bump has already landed. `git rev-list` outputs newest-first;
+            # tail -n 1 gives the oldest.
+            BUMP_SHA=$(git rev-list \
+              --author='easy-versioning\[bot\]' \
+              --grep='^chore(release): bump versions' \
+              "${HEAD_SHA}..origin/main" | tail -n 1)
+            [ -n "$BUMP_SHA" ] || { echo "::error::No bump commit found in range"; exit 1; }
+
+            # Assert single-parent-equals-HEAD_SHA. Rejects anything that did
+            # not land directly after the triggering merge commit.
+            PARENT=$(git rev-parse "${BUMP_SHA}^")
+            if [ "$PARENT" != "$HEAD_SHA" ]; then
+              echo "::error::Bump commit ${BUMP_SHA} parent ${PARENT} does not equal head_sha ${HEAD_SHA}"
+              exit 1
+            fi
+
+            # Assert author is the easy-versioning App bot.
+            AUTHOR_EMAIL=$(git log -1 --format='%ae' "$BUMP_SHA")
+            if ! echo "$AUTHOR_EMAIL" | grep -q '+easy-versioning\[bot\]@users\.noreply\.github\.com$'; then
+              echo "::error::Bump commit ${BUMP_SHA} author ${AUTHOR_EMAIL} is not easy-versioning[bot]"
+              exit 1
+            fi
+
+            BUILD_SHA="$BUMP_SHA"
+            echo "workflow_run: building bump commit ${BUILD_SHA} (parent=${PARENT}, author=${AUTHOR_EMAIL})"
+          fi
+          echo "sha=${BUILD_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout build commit
+        if: steps.select.outputs.skip != 'true'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.bump.outputs.sha }}
+          fetch-depth: 1
+
+      # ── Read version + compute owner/image refs ──────────────────────────
+      - name: Read package version
+        id: ver
+        if: steps.select.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r '.version' "${{ matrix.version_file }}")
+          [ "$VERSION" != "null" ] && [ -n "$VERSION" ] || { echo "::error::Empty version in ${{ matrix.version_file }}"; exit 1; }
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Lowercase owner
+        id: owner
+        if: steps.select.outputs.skip != 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "lc=${OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      # ── Digest-authoritative idempotency check (spec §4.4) ───────────────
+      # Skip ALL subsequent steps (build, push, AND latest re-tag) if the
+      # <version> tag already resolves to a manifest. Re-pushing latest to a
+      # stale digest would be a downgrade vector — see spec C4.
+      - name: Setup buildx (for imagetools inspect)
+        if: steps.select.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR (for imagetools inspect)
+        if: steps.select.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if version already published
+        id: exists
+        if: steps.select.outputs.skip != 'true'
+        run: |
+          REF="ghcr.io/${{ steps.owner.outputs.lc }}/better-bookmarks2-${{ matrix.image }}:${{ steps.ver.outputs.version }}"
+          if docker buildx imagetools inspect "$REF" >/dev/null 2>&1; then
+            echo "Already published: $REF — skipping build, push, and latest re-tag."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not yet published: $REF — proceeding."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Build path (only when not already published) ─────────────────────
+      - name: Set up QEMU (multi-arch)
+        if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Generate image metadata (tags + OCI labels)
+        if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.lc }}/better-bookmarks2-${{ matrix.image }}
+          # <version> and latest only — no sha-<short> per project decision.
+          # Incident-response runbook for digest→commit lookup lives in the
+          # spec §10 and is documented in README's Pinning section.
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=better-bookmarks2-${{ matrix.image }}
+            org.opencontainers.image.description=Better Bookmarks 2 — ${{ matrix.image }} service
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build & push
+        if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Per-image cache scope so frontend / db / email / metadata-fetcher
+          # caches do not collide. Writes only happen on main-driven runs
+          # (enforced by the job-level if: gate above).
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+          # SPDX SBOM + in-toto build-provenance attached to the manifest
+          # (≈ SLSA L2 — see spec §4.5).
+          sbom: true
+          provenance: mode=max
+
+      # ── Sigstore-signed attestation pinned to the manifest-list digest ───
+      # subject-digest MUST be the manifest-list digest (NOT a per-arch child)
+      # so both linux/amd64 and linux/arm64 pulls verify cleanly. See spec H3.
+      #
+      # GATE: attest-build-provenance does not work on private repositories on
+      # free GitHub plans. Skip it while the repo is private so the rest of
+      # the publish pipeline still runs; the step starts working automatically
+      # once the repo is flipped to public. Provenance metadata is still
+      # embedded in the image via `provenance: mode=max` in build-push-action
+      # above — that's an in-image attestation, distinct from the Sigstore
+      # signature this step would attach to the package separately.
+      - name: Check repo visibility
+        if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        id: visibility
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRIVATE=$(gh api "/repos/${{ github.repository }}" --jq '.private')
+          echo "private=${PRIVATE}" >> "$GITHUB_OUTPUT"
+          if [ "$PRIVATE" = "true" ]; then
+            echo "::notice::Repo is private — skipping attest-build-provenance (free-plan limitation). Re-enable automatically once the repo is public."
+          fi
+
+      - name: Attest build provenance
+        if: >
+          steps.select.outputs.skip != 'true'
+          && steps.exists.outputs.skip != 'true'
+          && steps.visibility.outputs.private != 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ steps.owner.outputs.lc }}/better-bookmarks2-${{ matrix.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        if: always() && steps.select.outputs.skip != 'true'
+        run: |
+          REF="ghcr.io/${{ steps.owner.outputs.lc }}/better-bookmarks2-${{ matrix.image }}:${{ steps.ver.outputs.version }}"
+          if [ "${{ steps.exists.outputs.skip }}" = "true" ]; then
+            echo "::notice::${{ matrix.image }} ${{ steps.ver.outputs.version }} already published — no-op"
+          else
+            echo "::notice::${{ matrix.image }} ${{ steps.ver.outputs.version }} published at ${REF}"
+            echo "  digest: ${{ steps.push.outputs.digest }}"
+          fi
