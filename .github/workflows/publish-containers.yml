@@ -119,6 +119,27 @@ jobs:
       # (per spec §4.1) so an attacker cannot substitute a follow-up commit's
       # tree into a tag for a prior bump's version.
       #
+      # Superseded-bump tolerance: when two PR merges land in rapid
+      # succession, the easy-versioning bot's rebase-before-push step can
+      # produce a single bump whose parent is the LATER merge's commit, not
+      # this workflow_run's HEAD_SHA. The strict parent-equals-HEAD_SHA
+      # check then rejects this workflow_run even though no attack
+      # occurred — a separate workflow_run (triggered by the later merge's
+      # easy-versioning success, carrying HEAD_SHA equal to the later
+      # merge) will find that same bump with parent matching, publish for
+      # it, and the digest-authoritative idempotency check (Check if
+      # version already published) recovers any version this run skipped.
+      # To stop the workflows tab from flashing red on legitimate races,
+      # we exit GREEN with skip=true here instead of failing. We do NOT
+      # publish — the security property "publish only for a bump that is
+      # an easy-versioning[bot] commit directly following HEAD_SHA" is
+      # preserved exactly; the skip path produces no artefacts.
+      #
+      # Defence in depth: the skip path requires HEAD_SHA to still be an
+      # ancestor of the bump on main. If HEAD_SHA is no longer reachable
+      # from bump (force-push, branch reset, rewritten history), we fall
+      # back to the original loud failure.
+      #
       # workflow_dispatch: operator-trusted, just use the current ref's HEAD.
       - name: Fetch full history (workflow_run only)
         if: steps.select.outputs.skip != 'true' && github.event_name == 'workflow_run'
@@ -145,11 +166,21 @@ jobs:
               "${HEAD_SHA}..origin/main" | tail -n 1)
             [ -n "$BUMP_SHA" ] || { echo "::error::No bump commit found in range"; exit 1; }
 
-            # Assert single-parent-equals-HEAD_SHA. Rejects anything that did
-            # not land directly after the triggering merge commit.
+            # Assert single-parent-equals-HEAD_SHA. The happy path: the bump
+            # landed directly after the triggering merge.
             PARENT=$(git rev-parse "${BUMP_SHA}^")
             if [ "$PARENT" != "$HEAD_SHA" ]; then
-              echo "::error::Bump commit ${BUMP_SHA} parent ${PARENT} does not equal head_sha ${HEAD_SHA}"
+              # Superseded-bump case: a later merge already landed between
+              # HEAD_SHA and BUMP_SHA. Another workflow_run (for that later
+              # merge's HEAD_SHA) will produce the publish; bail green here
+              # so the workflows tab is not red for a benign race. Require
+              # HEAD_SHA to still be reachable on main as defence in depth.
+              if git merge-base --is-ancestor "$HEAD_SHA" "$BUMP_SHA"; then
+                echo "::notice::workflow_run superseded — bump ${BUMP_SHA} parent ${PARENT} != head_sha ${HEAD_SHA}; head_sha is an ancestor of bump on main, so a later workflow_run will publish (downstream idempotency covers any in-flight version)."
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "::error::Bump commit ${BUMP_SHA} parent ${PARENT} does not equal head_sha ${HEAD_SHA}, and head_sha is NOT an ancestor of bump (history was rewritten — refusing to publish)"
               exit 1
             fi
 
@@ -166,7 +197,7 @@ jobs:
           echo "sha=${BUILD_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout build commit
-        if: steps.select.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.bump.outputs.sha }}
@@ -175,7 +206,7 @@ jobs:
       # ── Read version + compute owner/image refs ──────────────────────────
       - name: Read package version
         id: ver
-        if: steps.select.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         run: |
           set -euo pipefail
           VERSION=$(jq -r '.version' "${{ matrix.version_file }}")
@@ -184,7 +215,7 @@ jobs:
 
       - name: Lowercase owner
         id: owner
-        if: steps.select.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         env:
           OWNER: ${{ github.repository_owner }}
         run: echo "lc=${OWNER,,}" >> "$GITHUB_OUTPUT"
@@ -194,11 +225,11 @@ jobs:
       # <version> tag already resolves to a manifest. Re-pushing latest to a
       # stale digest would be a downgrade vector — see spec C4.
       - name: Setup buildx (for imagetools inspect)
-        if: steps.select.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR (for imagetools inspect)
-        if: steps.select.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -207,7 +238,7 @@ jobs:
 
       - name: Check if version already published
         id: exists
-        if: steps.select.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true'
         run: |
           REF="ghcr.io/${{ steps.owner.outputs.lc }}/better-bookmarks2-${{ matrix.image }}:${{ steps.ver.outputs.version }}"
           if docker buildx imagetools inspect "$REF" >/dev/null 2>&1; then
@@ -220,11 +251,11 @@ jobs:
 
       # ── Build path (only when not already published) ─────────────────────
       - name: Set up QEMU (multi-arch)
-        if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Generate image metadata (tags + OCI labels)
-        if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -241,7 +272,7 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: Build & push
-        if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
         id: push
         uses: docker/build-push-action@v6
         with:
@@ -274,7 +305,7 @@ jobs:
       # above — that's an in-image attestation, distinct from the Sigstore
       # signature this step would attach to the package separately.
       - name: Check repo visibility
-        if: steps.select.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
+        if: steps.select.outputs.skip != 'true' && steps.bump.outputs.skip != 'true' && steps.exists.outputs.skip != 'true'
         id: visibility
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -288,6 +319,7 @@ jobs:
       - name: Attest build provenance
         if: >
           steps.select.outputs.skip != 'true'
+          && steps.bump.outputs.skip != 'true'
           && steps.exists.outputs.skip != 'true'
           && steps.visibility.outputs.private != 'true'
         uses: actions/attest-build-provenance@v2
@@ -299,6 +331,10 @@ jobs:
       - name: Summary
         if: always() && steps.select.outputs.skip != 'true'
         run: |
+          if [ "${{ steps.bump.outputs.skip }}" = "true" ]; then
+            echo "::notice::${{ matrix.image }} — workflow_run superseded by a later bump (no publish; downstream idempotency check covers any in-flight version)"
+            exit 0
+          fi
           REF="ghcr.io/${{ steps.owner.outputs.lc }}/better-bookmarks2-${{ matrix.image }}:${{ steps.ver.outputs.version }}"
           if [ "${{ steps.exists.outputs.skip }}" = "true" ]; then
             echo "::notice::${{ matrix.image }} ${{ steps.ver.outputs.version }} already published — no-op"
