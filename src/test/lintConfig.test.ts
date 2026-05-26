@@ -34,7 +34,12 @@ describe('no-restricted-syntax: side-effects inside React setState updaters', ()
     `;
     const result = await lint(code);
     expect(result.errorCount).toBe(1);
-    expect(result.messages[0].nodeType).toBe('CallExpression');
+    // messageId is part of the ESLint rule API contract and stable across
+    // major versions. The previously-asserted `nodeType` field was removed
+    // from LintMessage in ESLint 10.0.0; messageId identifies WHICH rule
+    // fired (no-restricted-syntax produces 'restrictedSyntax'), which is a
+    // stronger assertion than the AST node kind anyway.
+    expect(result.messages[0].messageId).toBe('restrictedSyntax');
     expect(result.messages[0].message).toMatch(/setState.*updater/);
   });
 
