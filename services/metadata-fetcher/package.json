@@ -1,6 +1,6 @@
 {
   "name": "@better-bookmarks/metadata-fetcher",
-  "version": "26.5.18-4",
+  "version": "26.5.26",
   "type": "module",
   "engines": {
     "node": "^22"
