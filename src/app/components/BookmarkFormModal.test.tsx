@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { BookmarkFormModal } from './BookmarkFormModal';
 import type { Tag } from '../../lib/tags';
 
@@ -151,7 +151,7 @@ describe('BookmarkFormModal', () => {
   });
 
   it('submitting an empty form shows required errors on Title and URL', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderAdd();
     await user.click(screen.getByRole('button', { name: /^save$/i }));
     await waitFor(() => {
@@ -164,7 +164,7 @@ describe('BookmarkFormModal', () => {
     vi.mocked(createBookmark).mockResolvedValue({ id: 'new-bm' } as never);
     const onSave = vi.fn();
     const onClose = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <BookmarkFormModal
         open={true}
@@ -192,7 +192,7 @@ describe('BookmarkFormModal', () => {
     vi.mocked(updateBookmark).mockResolvedValue(undefined as never);
     const onSave = vi.fn();
     const onClose = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <BookmarkFormModal
         open={true}
@@ -224,7 +224,7 @@ describe('BookmarkFormModal', () => {
     vi.mocked(deleteBookmark).mockResolvedValue(undefined as never);
     const onSave = vi.fn();
     const onClose = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <BookmarkFormModal
         open={true}
@@ -249,7 +249,7 @@ describe('BookmarkFormModal', () => {
     vi.mocked(createBookmark).mockImplementation(
       () => new Promise<{ id: string }>((res) => { resolveFn = res; }),
     );
-    const user = userEvent.setup();
+    const user = setupUser();
     renderAdd();
 
     await user.type(screen.getByPlaceholderText('Enter bookmark title\u2026'), 'Test');
@@ -265,7 +265,7 @@ describe('BookmarkFormModal', () => {
 
   it('shows a toast error when createBookmark rejects', async () => {
     vi.mocked(createBookmark).mockRejectedValue(new Error('Server error'));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderAdd();
 
     await user.type(screen.getByPlaceholderText('Enter bookmark title\u2026'), 'Test');
@@ -303,7 +303,7 @@ describe('BookmarkFormModal', () => {
 
   it('clicking Remove deletes the uploaded file and shows the URL input again', async () => {
     vi.mocked(uploadThumbnail).mockResolvedValue('img-new');
-    const user = userEvent.setup();
+    const user = setupUser();
     renderAdd();
 
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -338,7 +338,7 @@ describe('BookmarkFormModal', () => {
   it('saving in file mode passes thumbnailFileId and null thumbnailUrl to createBookmark', async () => {
     vi.mocked(uploadThumbnail).mockResolvedValue('img-uploaded');
     vi.mocked(createBookmark).mockResolvedValue({ id: 'new-bm' } as never);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderAdd();
 
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -361,7 +361,7 @@ describe('BookmarkFormModal', () => {
 
   it('closing the modal after a new upload calls deleteThumbnailImage (cleanup)', async () => {
     vi.mocked(uploadThumbnail).mockResolvedValue('img-cleanup');
-    const user = userEvent.setup();
+    const user = setupUser();
     renderAdd();
 
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -401,7 +401,7 @@ describe('BookmarkFormModal', () => {
 
   it('deleting a bookmark that has a thumbnailFileId also deletes the image', async () => {
     vi.mocked(deleteBookmark).mockResolvedValue(undefined as never);
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <BookmarkFormModal
         open={true}

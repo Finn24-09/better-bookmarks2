@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { BookmarkCard } from './BookmarkCard';
 
 describe('BookmarkCard', () => {
@@ -10,7 +10,7 @@ describe('BookmarkCard', () => {
 
   it('clicking the edit (pencil) button calls the onEdit prop', async () => {
     const onEdit = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <BookmarkCard
         title="My Video"
@@ -59,7 +59,7 @@ describe('BookmarkCard', () => {
 
   it('Play buttons open the bookmark URL in a new tab', async () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(
       <BookmarkCard
@@ -94,7 +94,7 @@ describe('BookmarkCard', () => {
     ['not a url at all'],
   ])('Open button does NOT call window.open for unsafe URL %s', async (badUrl) => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-    const user = userEvent.setup();
+    const user = setupUser();
 
     render(<BookmarkCard title="Bad" url={badUrl} tags={[]} />);
 
@@ -108,7 +108,7 @@ describe('BookmarkCard', () => {
     'Open button DOES call window.open for safe URL %s',
     async (goodUrl) => {
       const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
-      const user = userEvent.setup();
+      const user = setupUser();
 
       render(<BookmarkCard title="Good" url={goodUrl} tags={[]} />);
       const playButton = screen.getAllByRole('button', { name: /open bookmark/i })[0];

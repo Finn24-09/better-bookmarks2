@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { TagMultiSelect } from './TagMultiSelect';
 import { MAX_TAG_LENGTH, type Tag } from '../../lib/tags';
 import { Popover } from './ui/popover';
@@ -52,7 +52,7 @@ describe('TagMultiSelect', () => {
   });
 
   it('clicking the trigger opens the popover showing available tags', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <TagMultiSelect available={makeTags(['React', 'TypeScript'])} selected={[]} onChange={vi.fn()} />,
     );
@@ -65,7 +65,7 @@ describe('TagMultiSelect', () => {
 
   it('clicking a tag calls onChange with that tag id added to selection', async () => {
     const onChange = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     const tags = makeTags(['React', 'TypeScript']);
     render(<TagMultiSelect available={tags} selected={[]} onChange={onChange} />);
 
@@ -78,7 +78,7 @@ describe('TagMultiSelect', () => {
 
   it('clicking an already-selected tag removes it from the selection', async () => {
     const onChange = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     const tags = makeTags(['React', 'TypeScript']);
     render(<TagMultiSelect available={tags} selected={['tag-1']} onChange={onChange} />);
 
@@ -92,7 +92,7 @@ describe('TagMultiSelect', () => {
   });
 
   it('typing in the search input filters the visible tags', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <TagMultiSelect
         available={makeTags(['React', 'TypeScript', 'CSS'])}
@@ -113,7 +113,7 @@ describe('TagMultiSelect', () => {
   });
 
   it('shows a "Create" option when the search term has no matching tag', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <TagMultiSelect
         available={makeTags(['React'])}
@@ -135,7 +135,7 @@ describe('TagMultiSelect', () => {
     const newTag: Tag = { id: 'tag-new', name: 'Vue' };
     const onCreateTag = vi.fn().mockResolvedValue(newTag);
     const onChange = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <TagMultiSelect
         available={makeTags(['React'])}
@@ -157,7 +157,7 @@ describe('TagMultiSelect', () => {
   });
 
   it('hides the Create option and shows an inline error when the search exceeds MAX_TAG_LENGTH', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onCreateTag = vi.fn();
     render(
       <TagMultiSelect
@@ -198,7 +198,7 @@ describe('TagMultiSelect', () => {
 
   it('clicking the X pill button removes that tag from selection', async () => {
     const onChange = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     const tags = makeTags(['React', 'TypeScript']);
     render(
       <TagMultiSelect available={tags} selected={['tag-1']} onChange={onChange} />,

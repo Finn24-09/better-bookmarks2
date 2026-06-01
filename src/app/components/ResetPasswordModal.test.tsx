@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { ResetPasswordModal } from './ResetPasswordModal';
 
 // ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ describe('ResetPasswordModal · portal mount', () => {
 
 describe('ResetPasswordModal · password length policy', () => {
   it('rejects an 11-character password with "At least 12 characters"', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<ResetPasswordModal onClose={vi.fn()} />);
 
     // 11 chars — one short of policy
@@ -65,7 +65,7 @@ describe('ResetPasswordModal · password length policy', () => {
   });
 
   it('accepts a 12-character password (no length error, fetch fired)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<ResetPasswordModal onClose={vi.fn()} />);
 
     const twelve = 'Abcdefg12345';

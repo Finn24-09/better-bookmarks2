@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { MemoryRouter } from 'react-router';
 import { DeleteAccountModal } from './DeleteAccountModal';
 
@@ -72,14 +72,14 @@ describe('DeleteAccountModal', () => {
 
   it('clicking Cancel calls onClose', async () => {
     const onClose = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({ onClose });
     await user.click(screen.getByRole('button', { name: /^cancel$/i }));
     expect(onClose).toHaveBeenCalled();
   });
 
   it('sends email and advances to step 2', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
     await user.click(screen.getByRole('button', { name: /send confirmation email/i }));
     await waitFor(() => {

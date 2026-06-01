@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../test/userEvent';
 import { MemoryRouter } from 'react-router';
 import { AuthPage } from './AuthPage';
 
@@ -70,7 +70,7 @@ describe('AuthPage', () => {
   // -------------------------------------------------------------------------
 
   it('submitting an empty login form shows required-field errors', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
     // Click the first "Sign In" submit button (desktop login form)
     await user.click(screen.getAllByRole('button', { name: /^sign in$/i })[0]);
@@ -84,7 +84,7 @@ describe('AuthPage', () => {
   // -------------------------------------------------------------------------
 
   it('eye toggle changes password input type from "password" to "text"', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
     const passwordInputs = screen.getAllByPlaceholderText('Password');
     const firstPasswordInput = passwordInputs[0];
@@ -104,7 +104,7 @@ describe('AuthPage', () => {
     const mockKey = {} as CryptoKey;
     vi.mocked(signIn).mockResolvedValue({ token: 'tok', user_id: 'u1' } as never);
     vi.mocked(deriveKey).mockResolvedValue(mockKey);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     const emailInputs = screen.getAllByPlaceholderText('Email address');
@@ -128,7 +128,7 @@ describe('AuthPage', () => {
 
   it('shows the API error message when sign-in fails', async () => {
     vi.mocked(signIn).mockRejectedValue(new Error('Invalid credentials'));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.type(screen.getAllByPlaceholderText('Email address')[0], 'bad@example.com');
@@ -150,7 +150,7 @@ describe('AuthPage', () => {
 
   it('shows "Invalid email or password" toast when signIn throws ApiError(400)', async () => {
     vi.mocked(signIn).mockRejectedValue(new ApiError(400, 'Invalid email or password'));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.type(screen.getAllByPlaceholderText('Email address')[0], 'bad@example.com');
@@ -174,7 +174,7 @@ describe('AuthPage', () => {
   // -------------------------------------------------------------------------
 
   it('clicking the mobile "Sign Up" tab reveals the confirm-password field', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     // Before switching: only the desktop register form has "Confirm password"
@@ -195,7 +195,7 @@ describe('AuthPage', () => {
   // -------------------------------------------------------------------------
 
   it('register form shows "At least 12 characters" for a short password', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     // Desktop register form is always in the DOM — no need to switch tabs
@@ -215,7 +215,7 @@ describe('AuthPage', () => {
   });
 
   it('register form shows "Passwords do not match" when confirm differs', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.type(screen.getAllByPlaceholderText('Email address')[1], 'new@example.com');
@@ -236,7 +236,7 @@ describe('AuthPage', () => {
     const mockKey = {} as CryptoKey;
     vi.mocked(signUp).mockResolvedValue({ token: 'tok', user_id: 'u1' } as never);
     vi.mocked(deriveKey).mockResolvedValue(mockKey);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.type(screen.getAllByPlaceholderText('Email address')[1], 'new@example.com');
@@ -258,7 +258,7 @@ describe('AuthPage', () => {
 
   it('shows the API error message when sign-up fails', async () => {
     vi.mocked(signUp).mockRejectedValue(new Error('Email already in use'));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.type(screen.getAllByPlaceholderText('Email address')[1], 'dup@example.com');
@@ -350,7 +350,7 @@ describe('AuthPage', () => {
   });
 
   it('shows password strength hints in the register form after typing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderPage();
 
     await user.type(screen.getAllByPlaceholderText('Password')[1], 'abc');

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { MemoryRouter } from 'react-router';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import type { Bookmark } from '../../lib/bookmarks';
@@ -130,7 +130,7 @@ describe('ChangePasswordModal', () => {
   // Validation
   // -------------------------------------------------------------------------
   it('submitting with empty fields shows "Required" errors on all three', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
     await user.click(screen.getByRole('button', { name: /save password/i }));
     await waitFor(() => {
@@ -139,7 +139,7 @@ describe('ChangePasswordModal', () => {
   });
 
   it('shows "At least 12 characters" error for a short new password', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'old');
     await user.type(screen.getByPlaceholderText('Enter new password…'), 'short');
@@ -151,7 +151,7 @@ describe('ChangePasswordModal', () => {
   });
 
   it('shows "Passwords do not match" when confirm differs from new', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'oldpass123');
     await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
@@ -169,7 +169,7 @@ describe('ChangePasswordModal', () => {
     const mockKey = {} as CryptoKey;
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
     vi.mocked(deriveKey).mockResolvedValue(mockKey);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -192,7 +192,7 @@ describe('ChangePasswordModal', () => {
     const newKey = {} as CryptoKey;
     vi.mocked(deriveKey).mockResolvedValue(newKey);
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -212,7 +212,7 @@ describe('ChangePasswordModal', () => {
     vi.mocked(deriveKey).mockResolvedValue(newKey);
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
     vi.mocked(getBookmarks).mockResolvedValue([bm]);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -231,7 +231,7 @@ describe('ChangePasswordModal', () => {
     vi.mocked(deriveKey).mockResolvedValue(newKey);
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
     vi.mocked(getTags).mockResolvedValue([tag]);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -247,7 +247,7 @@ describe('ChangePasswordModal', () => {
   it('calls rotationStatus() to get the current key version before re-encrypting', async () => {
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
     vi.mocked(deriveKey).mockResolvedValue({} as CryptoKey);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -269,7 +269,7 @@ describe('ChangePasswordModal', () => {
     vi.mocked(reencryptThumbnailToBody).mockResolvedValue({
       imageId: 'img-1', data_enc: 'enc-data', original_name_enc: 'enc-name',
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -291,7 +291,7 @@ describe('ChangePasswordModal', () => {
     vi.mocked(getBookmarks).mockResolvedValue([bm]);
     vi.mocked(reencryptBookmark).mockImplementation(async () => { calls.push('reencrypt'); });
     vi.mocked(changePassword).mockImplementation(async () => { calls.push('changePassword'); return undefined as never; });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -319,7 +319,7 @@ describe('ChangePasswordModal', () => {
       calls.push('changePassword');
       return undefined as never;
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -345,7 +345,7 @@ describe('ChangePasswordModal', () => {
     mockLogout.mockImplementation(() => {
       calls.push('logout');
     });
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -368,7 +368,7 @@ describe('ChangePasswordModal', () => {
     vi.mocked(changePassword).mockImplementation(
       () => new Promise<never>((res) => { resolveFn = () => res(undefined as never); }),
     );
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -385,7 +385,7 @@ describe('ChangePasswordModal', () => {
 
   it('shows the API error message as a toast when changePassword rejects', async () => {
     vi.mocked(changePassword).mockRejectedValue(new Error('Wrong password'));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
@@ -402,7 +402,7 @@ describe('ChangePasswordModal', () => {
   // Show / hide password toggles
   // -------------------------------------------------------------------------
   it('eye toggle on "New Password" changes input type from "password" to "text"', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     const newPasswordInput = screen.getByPlaceholderText('Enter new password…');
@@ -415,7 +415,7 @@ describe('ChangePasswordModal', () => {
   });
 
   it('eye toggle on "Current Password" changes input type from "password" to "text"', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     const currentPasswordInput = screen.getByPlaceholderText('Enter current password…');
@@ -431,7 +431,7 @@ describe('ChangePasswordModal', () => {
   // Password strength hints
   // -------------------------------------------------------------------------
   it('shows password strength hints for the new password field after typing', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal();
 
     await user.type(screen.getByPlaceholderText('Enter new password…'), 'abc');

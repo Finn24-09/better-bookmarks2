@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../test/userEvent';
 import { MemoryRouter } from 'react-router';
 import App from './App';
 import type { Bookmark } from '../lib/bookmarks';
@@ -152,7 +152,7 @@ describe('App', () => {
   });
 
   it('clicking the Add Bookmark FAB opens the BookmarkFormModal', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     // Use a non-empty bookmark list so the welcome banner (which also has a
     // purple gradient button) is hidden, keeping the FAB selector unambiguous.
     vi.mocked(useBookmarks).mockReturnValue({
@@ -174,7 +174,7 @@ describe('App', () => {
   });
 
   it('clicking the edit pencil on a card opens BookmarkFormModal in edit mode', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     vi.mocked(useBookmarks).mockReturnValue({
       ...DEFAULT_HOOK,
       bookmarks: [makeBookmark({ id: 'bm-1', title: 'My Bookmark' })],
