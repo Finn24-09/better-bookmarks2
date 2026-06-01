@@ -354,16 +354,37 @@ describe('POST /title — concurrency caps', () => {
   let token: string;
   beforeEach(async () => { token = await makeToken(); });
 
-  it('429 when per-user concurrent cap exceeded', async () => {
-    // Use a dispatch that blocks until we release it; that holds the semaphore.
+  // A dispatch that blocks until released, used to pin a request inside the
+  // route while it holds the semaphore slot(s). It signals `entered` on the
+  // first invocation, then keeps blocking on `release`.
+  //
+  // Why `entered` instead of a fixed `setImmediate` tick (issue #77): the
+  // route's pre-acquire pipeline is asynchronous (rate-limit hook → await
+  // jose jwtVerify → zod parse) before the synchronous globalSem/perUserSem
+  // tryAcquire calls (title.ts), and dispatch is only reached AFTER both slots
+  // are held. A single setImmediate tick is not a sound guarantee that the
+  // un-awaited first request has acquired its slot under contended CI; if the
+  // ordering slipped, the second request won the slot, blocked in dispatch,
+  // and the awaited injection hung to the 5000ms test timeout. Awaiting
+  // `entered` waits for the actual condition — first provably holds the slot —
+  // so the second request deterministically hits the cap. No production change.
+  function makeBlockingDispatch() {
     let release: () => void = () => {};
+    let signalEntered: () => void = () => {};
     const block = new Promise<void>((r) => { release = r; });
+    const entered = new Promise<void>((r) => { signalEntered = r; });
     const dispatch = async (opts: { signal: AbortSignal }) => {
+      signalEntered();
       await block;
-      const stream = new Readable({ read() { this.push('<title>x</title>'); this.push(null); } });
       void opts;
+      const stream = new Readable({ read() { this.push('<title>x</title>'); this.push(null); } });
       return { statusCode: 200, headers: { 'content-type': 'text/html' }, body: stream };
     };
+    return { dispatch, entered, release };
+  }
+
+  it('429 when per-user concurrent cap exceeded', async () => {
+    const { dispatch, entered, release } = makeBlockingDispatch();
     const app = await buildTestApp({ resolver: publicResolver, dispatch, perUserCap: 1 });
     try {
       const first = app.inject({
@@ -371,8 +392,8 @@ describe('POST /title — concurrency caps', () => {
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         payload: { url: 'https://x.example/' },
       });
-      // Give the first request time to acquire the per-user slot before issuing the second.
-      await new Promise(r => setImmediate(r));
+      // first has provably acquired the per-user slot once dispatch is entered.
+      await entered;
       const second = await app.inject({
         method: 'POST', url: '/title',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -387,14 +408,7 @@ describe('POST /title — concurrency caps', () => {
   });
 
   it('503 when global concurrent cap exceeded', async () => {
-    let release: () => void = () => {};
-    const block = new Promise<void>((r) => { release = r; });
-    const dispatch = async (opts: { signal: AbortSignal }) => {
-      await block;
-      void opts;
-      const stream = new Readable({ read() { this.push('<title>x</title>'); this.push(null); } });
-      return { statusCode: 200, headers: { 'content-type': 'text/html' }, body: stream };
-    };
+    const { dispatch, entered, release } = makeBlockingDispatch();
     const app = await buildTestApp({ resolver: publicResolver, dispatch, globalCap: 1, perUserCap: 5 });
     try {
       // Use two different users so per-user cap doesn't trigger.
@@ -405,7 +419,8 @@ describe('POST /title — concurrency caps', () => {
         headers: { authorization: `Bearer ${t1}`, 'content-type': 'application/json' },
         payload: { url: 'https://x.example/' },
       });
-      await new Promise(r => setImmediate(r));
+      // first has provably acquired the single global slot once dispatch is entered.
+      await entered;
       const second = await app.inject({
         method: 'POST', url: '/title',
         headers: { authorization: `Bearer ${t2}`, 'content-type': 'application/json' },
