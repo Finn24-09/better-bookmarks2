@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { SearchBar } from './SearchBar';
 
 describe('SearchBar', () => {
@@ -11,7 +11,7 @@ describe('SearchBar', () => {
 
   it('calls onChange when the user types', async () => {
     const onChange = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SearchBar value="" onChange={onChange} />);
     await user.type(screen.getByPlaceholderText('Search bookmarks...'), 'react');
     expect(onChange).toHaveBeenCalled();
@@ -30,7 +30,7 @@ describe('SearchBar', () => {
 
   it('clicking the clear button calls onChange with an empty string', async () => {
     const onChange = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SearchBar value="react" onChange={onChange} />);
     await user.click(screen.getByRole('button'));
     expect(onChange).toHaveBeenCalledWith('');

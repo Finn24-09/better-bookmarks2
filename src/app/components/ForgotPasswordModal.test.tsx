@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ describe('ForgotPasswordModal', () => {
 
   it('shows the "done" view after a successful submit', async () => {
     vi.mocked(requestPasswordReset).mockResolvedValue(undefined);
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<ForgotPasswordModal onClose={vi.fn()} />);
 
     await user.type(screen.getByPlaceholderText('Email address'), 'a@b.com');
@@ -66,7 +66,7 @@ describe('ForgotPasswordModal', () => {
   // -------------------------------------------------------------------------
   it('returns to idle and shows a toast when requestPasswordReset rejects', async () => {
     vi.mocked(requestPasswordReset).mockRejectedValue(new Error('NetworkError'));
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<ForgotPasswordModal onClose={vi.fn()} />);
 
     await user.type(screen.getByPlaceholderText('Email address'), 'a@b.com');

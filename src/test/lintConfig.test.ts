@@ -258,3 +258,78 @@ describe('no-restricted-syntax: side-effects inside React setState updaters', ()
     expect(result.errorCount).toBe(0);
   });
 });
+
+describe('no-restricted-syntax: bare userEvent.setup() (issue #70)', () => {
+  // -------- POSITIVE: rule MUST fire --------
+
+  it('flags a bare userEvent.setup() with no arguments', async () => {
+    const code = `
+      function test() {
+        const user = userEvent.setup();
+      }
+    `;
+    const result = await lint(code);
+    expect(result.errorCount).toBe(1);
+    expect(result.messages[0].messageId).toBe('restrictedSyntax');
+    // Pins WHICH selector fired — the #70 message points at setupUser().
+    expect(result.messages[0].message).toMatch(/setupUser/);
+  });
+
+  // -------- NEGATIVE: rule MUST NOT fire --------
+
+  it('does NOT flag userEvent.setup({ delay: null }) (the sanctioned helper body)', async () => {
+    const code = `
+      function setupUser() {
+        return userEvent.setup({ delay: null });
+      }
+    `;
+    const result = await lint(code);
+    expect(result.errorCount).toBe(0);
+  });
+
+  it('does NOT flag a setupUser() call (the blessed escape hatch)', async () => {
+    const code = `
+      function test() {
+        const user = setupUser();
+      }
+    `;
+    const result = await lint(code);
+    expect(result.errorCount).toBe(0);
+  });
+
+  it('does NOT flag an unrelated zero-arg .setup() on a non-userEvent object', async () => {
+    // The selector is anchored to callee.object.name === 'userEvent', so a
+    // bare `pool.setup()` on any other object must pass.
+    const code = `
+      function test() {
+        pool.setup();
+      }
+    `;
+    const result = await lint(code);
+    expect(result.errorCount).toBe(0);
+  });
+});
+
+// Cross-concern regression guard: the concern-1 (setState updater) and
+// concern-2 (userEvent.setup) selectors must BOTH apply to the same .tsx
+// fixture. If a future refactor splits them into a separate test-files config
+// block, flat-config rule replacement would silently drop the setState
+// selectors for .tsx files — this combined count would then change and fail.
+describe('no-restricted-syntax: both concerns apply to one file', () => {
+  it('reports a setState-updater side-effect AND a bare userEvent.setup() together', async () => {
+    const code = `
+      function Comp() {
+        setState((s) => {
+          sideEffect();
+          return s;
+        });
+        const user = userEvent.setup();
+      }
+    `;
+    const result = await lint(code);
+    expect(result.errorCount).toBe(2);
+    const messages = result.messages.map((m) => m.message);
+    expect(messages.some((m) => /setState.*updater/.test(m))).toBe(true);
+    expect(messages.some((m) => /setupUser/.test(m))).toBe(true);
+  });
+});

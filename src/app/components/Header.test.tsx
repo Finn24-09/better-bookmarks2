@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { Header } from './Header';
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ describe('Header', () => {
   });
 
   it('opening the dropdown shows the user email', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderHeader();
     await user.click(screen.getByRole('button'));
     await waitFor(() =>
@@ -61,7 +61,7 @@ describe('Header', () => {
 
   it('clicking "Change Password" calls the onChangePassword prop', async () => {
     const onChangePassword = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     renderHeader({ onChangePassword });
     await user.click(screen.getByRole('button'));
     await waitFor(() => expect(screen.getByText('Change Password')).toBeInTheDocument());
@@ -70,7 +70,7 @@ describe('Header', () => {
   });
 
   it('clicking "Log Out" calls logout() and navigates to /login', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderHeader();
     await user.click(screen.getByRole('button'));
     await waitFor(() => expect(screen.getByText('Log Out')).toBeInTheDocument());
@@ -81,7 +81,7 @@ describe('Header', () => {
 
   it('clicking "Delete Account" calls the onDeleteAccount prop', async () => {
     const onDeleteAccount = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     renderHeader({ onDeleteAccount });
     await user.click(screen.getByRole('button'));
     await waitFor(() => expect(screen.getByText('Delete Account')).toBeInTheDocument());
@@ -91,7 +91,7 @@ describe('Header', () => {
 
   it('clicking "Manage Tags" calls the onManageTags prop', async () => {
     const onManageTags = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     renderHeader({ onManageTags });
     await user.click(screen.getByRole('button'));
     await waitFor(() => expect(screen.getByText('Manage Tags')).toBeInTheDocument());

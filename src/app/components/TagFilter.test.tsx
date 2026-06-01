@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { TagFilter } from './TagFilter';
 import type { Tag } from '../../lib/tags';
 
@@ -53,7 +53,7 @@ describe('TagFilter', () => {
 
   it('clicking "All" calls onSelect(null)', async () => {
     const onSelect = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TagFilter tags={makeTags(2)} selected="tag-1" onSelect={onSelect} />);
     await user.click(screen.getByRole('button', { name: 'All' }));
     expect(onSelect).toHaveBeenCalledWith(null);
@@ -61,7 +61,7 @@ describe('TagFilter', () => {
 
   it('clicking a tag calls onSelect with that tag id', async () => {
     const onSelect = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TagFilter tags={makeTags(3)} selected={null} onSelect={onSelect} />);
     await user.click(screen.getByRole('button', { name: 'Tag 2' }));
     expect(onSelect).toHaveBeenCalledWith('tag-2');
@@ -69,7 +69,7 @@ describe('TagFilter', () => {
 
   it('clicking the currently-active tag calls onSelect(null) to deselect', async () => {
     const onSelect = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TagFilter tags={makeTags(3)} selected="tag-1" onSelect={onSelect} />);
     await user.click(screen.getByRole('button', { name: 'Tag 1' }));
     expect(onSelect).toHaveBeenCalledWith(null);
@@ -86,7 +86,7 @@ describe('TagFilter', () => {
   });
 
   it('clicking "Show More" reveals extra tags and relabels button to "Show Less"', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TagFilter tags={makeTags(7)} selected={null} onSelect={vi.fn()} />);
 
     // Tags beyond the first 5 are not visible initially
@@ -99,7 +99,7 @@ describe('TagFilter', () => {
   });
 
   it('clicking "Show Less" hides extra tags again', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<TagFilter tags={makeTags(7)} selected={null} onSelect={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: /show more/i }));

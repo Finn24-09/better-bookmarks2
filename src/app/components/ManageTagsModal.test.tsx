@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/userEvent';
 import { ApiError } from '../../lib/api';
 import { ManageTagsModal } from './ManageTagsModal';
 import type { Tag } from '../../lib/tags';
@@ -111,7 +111,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('renders a search input when there are more than 10 tags and filters the list', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const tags = Array.from({ length: 12 }, (_, i) =>
       makeTag({ id: `t${i}`, name: `Tag${i}` }),
     );
@@ -142,7 +142,7 @@ describe('ManageTagsModal', () => {
   // Rename — UI transitions and save validation
   // -------------------------------------------------------------------------
   it('clicking pencil swaps the row to an input prefilled with the current name', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({ tags: [makeTag({ name: 'Personal' })] });
     await user.click(screen.getByLabelText('Rename Personal'));
     const input = screen.getByLabelText('New name for Personal') as HTMLInputElement;
@@ -151,7 +151,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('pre-fills the edit input with the trimmed name so legacy whitespace can be fixed', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     // Legacy record whose decrypted name has surrounding whitespace, e.g.
     // a tag created before the createTag trim fix landed.
     renderModal({ tags: [makeTag({ id: 'tag-x', name: ' Personal ' })] });
@@ -177,7 +177,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('Save is disabled when the trimmed value equals the current name (no-op)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({ tags: [makeTag({ name: 'Personal' })] });
     await user.click(screen.getByLabelText('Rename Personal'));
     const saveBtn = screen.getByLabelText('Save rename');
@@ -185,7 +185,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('Save is disabled when the trimmed value is empty', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({ tags: [makeTag({ name: 'Personal' })] });
     await user.click(screen.getByLabelText('Rename Personal'));
     const input = screen.getByLabelText('New name for Personal');
@@ -195,7 +195,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('Save is disabled when the value exceeds MAX_TAG_LENGTH (100 chars)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({ tags: [makeTag({ name: 'Personal' })] });
     await user.click(screen.getByLabelText('Rename Personal'));
     const input = screen.getByLabelText('New name for Personal');
@@ -205,7 +205,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('Save with a new value calls updateTag and onSave', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onSave = vi.fn();
     renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })], onSave });
     await user.click(screen.getByLabelText('Rename Personal'));
@@ -230,7 +230,7 @@ describe('ManageTagsModal', () => {
   // Rename — error handling
   // -------------------------------------------------------------------------
   it('on 409 from updateTag, shows the literal frontend toast (not PostgREST body) and preserves typed value', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     // PostgREST raw body would be e.g. "duplicate key value violates unique constraint tags_user_id_name_hmac_key"
     vi.mocked(updateTag).mockRejectedValue(
       new ApiError(409, 'duplicate key value violates unique constraint tags_user_id_name_hmac_key'),
@@ -255,7 +255,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('on network failure, shows a generic toast and preserves typed value (does not reset to original)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     vi.mocked(updateTag).mockRejectedValue(new Error('network down'));
     renderModal({ tags: [makeTag({ name: 'Personal' })] });
     await user.click(screen.getByLabelText('Rename Personal'));
@@ -270,7 +270,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('Esc inside the rename input cancels edit mode and returns focus to the Pencil button', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({ tags: [makeTag({ name: 'Personal' })] });
     await user.click(screen.getByLabelText('Rename Personal'));
     const input = screen.getByLabelText('New name for Personal');
@@ -285,7 +285,7 @@ describe('ManageTagsModal', () => {
   // Delete — confirm flow
   // -------------------------------------------------------------------------
   it('clicking trash shows the confirm prompt with the count from getBookmarkTagCounts', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     vi.mocked(getBookmarkTagCounts).mockResolvedValue(new Map([['tag-x', 2]]));
     renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
     await waitFor(() =>
@@ -296,14 +296,14 @@ describe('ManageTagsModal', () => {
   });
 
   it('confirm prompt has role="alert"', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({ tags: [makeTag({ name: 'Personal' })] });
     await user.click(screen.getByLabelText('Delete Personal'));
     expect(screen.getByRole('alert')).toBeInTheDocument();
   });
 
   it('clicking the inline Delete button calls deleteTag, onTagDeleted(id), then onSave', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onTagDeleted = vi.fn();
     const onSave = vi.fn();
     renderModal({
@@ -325,7 +325,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('Cancel returns the row to idle state', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({ tags: [makeTag({ name: 'Personal' })] });
     await user.click(screen.getByLabelText('Delete Personal'));
     await user.click(screen.getByRole('button', { name: /cancel/i }));
@@ -334,7 +334,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('Esc in confirm-delete state cancels the confirm without calling onClose (modal stays open)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onClose = vi.fn();
     renderModal({ tags: [makeTag({ name: 'Personal' })], onClose });
     await user.click(screen.getByLabelText('Delete Personal'));
@@ -350,7 +350,7 @@ describe('ManageTagsModal', () => {
   // Concurrency — only one row in edit/confirm at a time
   // -------------------------------------------------------------------------
   it('opening a second row in edit mode cancels the first (typed value is lost)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderModal({
       tags: [
         makeTag({ id: 't1', name: 'First' }),
@@ -413,7 +413,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('does NOT render the usage pill while a row is in edit state', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     vi.mocked(getBookmarkTagCounts).mockResolvedValue(new Map([['tag-x', 2]]));
     renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
 
@@ -425,7 +425,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('does NOT render the usage pill while a row is in confirm-delete state', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     vi.mocked(getBookmarkTagCounts).mockResolvedValue(new Map([['tag-x', 1]]));
     renderModal({ tags: [makeTag({ id: 'tag-x', name: 'Personal' })] });
 
@@ -461,7 +461,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('usage pill counts are correct on rows surviving a search filter', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     vi.mocked(getBookmarkTagCounts).mockResolvedValue(
       new Map([
         ['t3', 2],
@@ -483,7 +483,7 @@ describe('ManageTagsModal', () => {
   });
 
   it('aborts in-flight apiFetch calls when the modal unmounts', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     let receivedSignal: AbortSignal | undefined;
     vi.mocked(updateTag).mockImplementation(async (_id, _name, _userId, _key, options) => {
       receivedSignal = options?.signal;

@@ -1,6 +1,13 @@
 // eslint.config.mjs
 //
-// Single-rule lint config: forbid side-effecting CallExpressions inside
+// One ESLint rule (`no-restricted-syntax`) guarding two distinct, unrelated
+// invariants through separate selectors. They share the rule only because
+// flat config replaces (does not merge) a rule's options across config
+// objects matching the same file, so splitting them into separate blocks
+// would silently drop one set of selectors for the overlapping files (see
+// the rules array below for the full reasoning).
+//
+// Concern 1 (Selectors 1-3): forbid side-effecting CallExpressions inside
 // React `setState`-like updater bodies. The rule exists because React's
 // dispatch semantics (StrictMode dev double-call, concurrent rendering
 // speculative renders, reconciliation re-runs after batched dispatches)
@@ -9,6 +16,14 @@
 // (`setAuthToken`, ref assignment, fetch, etc.) becomes a race. See
 // issue #45 and the PR #44 fix (commit 5488389).
 //
+// Concern 2 (Selector 4): forbid a bare `userEvent.setup()` in tests. Its
+// default per-keystroke delay schedules a setTimeout(0) macrotask per
+// keystroke; under heavy parallel CPU load the timer queue starves, long
+// `type()` calls blow the 5s test timeout, and keystrokes queued past the
+// aborted test bleed into the next test's input. Use `setupUser()` from
+// `src/test/userEvent.ts` (which passes `{ delay: null }`) instead. See
+// issue #70.
+//
 // File suffix is `.mjs` (not `.js`) so Node loads it natively as ESM.
 // Package.json is not `"type": "module"`, so a `.js` ESLint config would
 // be loaded via ESLint's optional `jiti` peer dependency — currently
@@ -16,11 +31,11 @@
 // upstream tree shift could silently disable this entire rule. `.mjs`
 // removes that fragile dependency chain. See PR #63 review (item 2).
 //
-// Intentionally narrow: only this one rule, only on src/**/*.{ts,tsx}.
-// Broader linting (typescript-eslint recommended, react-hooks, etc.) is
-// a separate decision tracked in its own future PR.
+// Intentionally narrow: only `no-restricted-syntax`, only on
+// src/**/*.{ts,tsx}. Broader linting (typescript-eslint recommended,
+// react-hooks, etc.) is a separate decision tracked in its own future PR.
 //
-// Selector coverage:
+// Concern 1 selector coverage (setState updaters):
 //   - Selector 1: direct ExpressionStatement > CallExpression children of
 //     the updater BlockStatement (the literal PR #44 shape).
 //   - Selector 2: ExpressionStatement > CallExpression one level inside a
@@ -32,6 +47,13 @@
 //     mutually exclusive on the same node — an IfStatement's consequent
 //     and alternate are each EITHER a BlockStatement OR a bare
 //     ExpressionStatement, never both — so they cannot double-fire.
+//
+// Concern 2 selector coverage (test hygiene, issue #70):
+//   - Selector 4: a bare `userEvent.setup()` MemberExpression call with no
+//     arguments. Anchored on `callee.object.name='userEvent'` so unrelated
+//     `*.setup()` calls are untouched, and on `arguments.length=0` so the
+//     sanctioned `userEvent.setup({ delay: null })` inside the `setupUser()`
+//     helper (1 argument) is not flagged.
 //
 // NOT covered (manual review required; see CLAUDE.md):
 //   - `else if` chains (alternate is an IfStatement, not a BlockStatement
@@ -87,6 +109,23 @@ const IF_UNBRACED_SELECTOR =
   ` > ExpressionStatement` +
   ` > CallExpression`;
 
+// Concern 2 (issue #70): a bare `userEvent.setup()` with no arguments.
+// Anchored to `userEvent` as the callee object so unrelated `*.setup()` calls
+// (e.g. `pool.setup()`) are not flagged, and to `arguments.length=0` so the
+// helper's `userEvent.setup({ delay: null })` (1 argument) passes.
+const BARE_USEREVENT_SETUP_SELECTOR =
+  "CallExpression[callee.type='MemberExpression']" +
+  "[callee.object.name='userEvent'][callee.property.name='setup']" +
+  "[arguments.length=0]";
+
+const USEREVENT_DELAY_MESSAGE =
+  'Use setupUser() from src/test/userEvent instead of a bare userEvent.setup(). ' +
+  'The default per-keystroke delay schedules a setTimeout(0) macrotask per ' +
+  'keystroke; under heavy parallel CPU load the queue starves, long type() calls ' +
+  "time out, and keystrokes queued past the aborted test bleed into the next " +
+  "test's input. setupUser() passes { delay: null } for synchronous typing. " +
+  'See issue #70.';
+
 const SIDE_EFFECT_MESSAGE =
   'Do not place side-effecting calls inside a React setState-like updater. ' +
   'React may re-invoke the updater (StrictMode dev double-call, concurrent ' +
@@ -119,6 +158,8 @@ export default [
         { selector: DIRECT_BODY_SELECTOR, message: SIDE_EFFECT_MESSAGE },
         { selector: IF_BRANCH_SELECTOR, message: SIDE_EFFECT_MESSAGE },
         { selector: IF_UNBRACED_SELECTOR, message: SIDE_EFFECT_MESSAGE },
+        // --- concern 2: test hygiene (issue #70) ---
+        { selector: BARE_USEREVENT_SETUP_SELECTOR, message: USEREVENT_DELAY_MESSAGE },
       ],
     },
   },
