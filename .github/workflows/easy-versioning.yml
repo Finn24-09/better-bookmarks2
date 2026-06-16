@@ -22,7 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 2
+          # Full history: easy-versioning diffs the entire pushed range
+          # (before..after) to decide which packages changed. A shallow clone
+          # only covers single-commit pushes (squash merges, the bot's own
+          # [skip ci] commit); a rebase- or merge-commit-merged PR lands two or
+          # more commits in one push, so the action reaches for HEAD~N and a
+          # depth-2 clone fails with "unknown revision" (issue: run 27606276012).
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: Finn24-09/easy-versioning@v1
