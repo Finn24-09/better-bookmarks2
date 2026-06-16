@@ -22,11 +22,11 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.9.2",
-    "@types/nodemailer": "^8.0.0",
+    "@types/node": "^25.9.3",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.11.10",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }
