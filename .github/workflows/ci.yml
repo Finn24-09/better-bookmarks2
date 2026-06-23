@@ -117,9 +117,15 @@ jobs:
 
   # PR-time smoke build for each Dockerfile whose context the PR touches.
   # No push, no run — just verify the Dockerfile still builds against the
-  # current source tree before main accepts the change. Multi-arch via QEMU
-  # to catch arm64-only regressions before the publish-containers workflow
-  # picks them up post-merge.
+  # current source tree before main accepts the change.
+  #
+  # amd64-only: building arm64 here means QEMU emulation on the amd64 runner,
+  # which for the frontend image (Vite/Rolldown native deps) is pathologically
+  # slow and intermittently hangs until the 6h job cap (see #108). The real
+  # multi-arch arm64 image is still built and pushed by publish-containers.yml
+  # on main, so arm64 coverage is not lost — the smoke build only needs to
+  # prove the Dockerfile builds at all. timeout-minutes is a safety net so any
+  # future stall fails fast instead of burning a runner for hours.
   #
   # The job is fanned out via a matrix so a Dockerfile-touching PR exercises
   # only the affected images. Cost: ~3 min per matched image.
@@ -129,6 +135,7 @@ jobs:
     # publish-containers workflow.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -177,18 +184,16 @@ jobs:
       - name: Skip if no relevant changes
         if: steps.changed.outputs.any_changed != 'true'
         run: echo "::notice::No changes under ${{ matrix.image }} build context — skipping smoke build"
-      - uses: docker/setup-qemu-action@v3
-        if: steps.changed.outputs.any_changed == 'true'
       - uses: docker/setup-buildx-action@v3
         if: steps.changed.outputs.any_changed == 'true'
-      - name: Smoke build (multi-arch, no push)
+      - name: Smoke build (amd64, no push)
         if: steps.changed.outputs.any_changed == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: false
           # GHA cache keyed per-image so concurrent smoke builds across PRs
           # do not collide.
