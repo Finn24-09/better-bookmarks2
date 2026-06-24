@@ -173,6 +173,12 @@ describe('App', () => {
     );
   });
 
+  it('renders the scroll-to-top button (wired into the layout)', () => {
+    renderApp();
+    // Present in the DOM even though it is inert until the user scrolls.
+    expect(screen.getByRole('button', { name: /scroll to top/i })).toBeInTheDocument();
+  });
+
   it('clicking the edit pencil on a card opens BookmarkFormModal in edit mode', async () => {
     const user = setupUser();
     vi.mocked(useBookmarks).mockReturnValue({

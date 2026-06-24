@@ -34,6 +34,13 @@ if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
+// ScrollToTopButton calls window.scrollTo. jsdom ships only a stub that logs
+// "Not implemented: Window's scrollTo()" — replace it with a silent noop so
+// tests can spy on it cleanly without console noise.
+if (typeof window !== 'undefined') {
+  window.scrollTo = () => {};
+}
+
 // Radix UI reads window.matchMedia for some responsive behaviours.
 if (typeof window !== 'undefined') {
   (window as unknown as Record<string, unknown>).matchMedia = (query: string) => ({
