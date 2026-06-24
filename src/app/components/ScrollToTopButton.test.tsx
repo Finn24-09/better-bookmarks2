@@ -33,16 +33,25 @@ function scrollDownPastViewport() {
   });
 }
 
+// Query the button by DOM, not by accessible role: when the button is `inert`
+// it is removed from the accessibility tree, so getByRole cannot (and should
+// not) find it. The shown-state tests below intentionally use getByRole, which
+// asserts the button IS accessible once visible.
+function getButton(): HTMLButtonElement {
+  const btn = document.querySelector('button[aria-label="Scroll to top"]');
+  if (!btn) throw new Error('Scroll-to-top button not found');
+  return btn as HTMLButtonElement;
+}
+
 describe('ScrollToTopButton', () => {
   it('renders a button labelled "Scroll to top"', () => {
     render(<ScrollToTopButton />);
-    expect(screen.getByRole('button', { name: /scroll to top/i })).toBeInTheDocument();
+    expect(getButton()).toBeInTheDocument();
   });
 
   it('is inert (hidden) by default before scrolling', () => {
     render(<ScrollToTopButton />);
-    const button = screen.getByRole('button', { name: /scroll to top/i });
-    expect(button).toHaveAttribute('inert');
+    expect(getButton()).toHaveAttribute('inert');
   });
 
   it('becomes interactive (inert removed) after scrolling past one viewport', () => {
@@ -50,6 +59,18 @@ describe('ScrollToTopButton', () => {
     scrollDownPastViewport();
     const button = screen.getByRole('button', { name: /scroll to top/i });
     expect(button).not.toHaveAttribute('inert');
+  });
+
+  it('becomes inert again after scrolling back below the viewport', () => {
+    render(<ScrollToTopButton />);
+    scrollDownPastViewport();
+    expect(getButton()).not.toHaveAttribute('inert'); // shown
+
+    act(() => {
+      setScroll(100); // back above the fold
+      window.dispatchEvent(new Event('scroll'));
+    });
+    expect(getButton()).toHaveAttribute('inert'); // hidden again
   });
 
   it('scrolls smoothly to the top on click', () => {
