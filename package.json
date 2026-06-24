@@ -1,7 +1,7 @@
 {
   "name": "better-bookmarks2",
   "private": true,
-  "version": "26.6.23-3",
+  "version": "26.6.24",
   "type": "module",
   "scripts": {
     "build": "vite build",
