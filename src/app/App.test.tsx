@@ -173,6 +173,15 @@ describe('App', () => {
     );
   });
 
+  it('renders the scroll-to-top button (wired into the layout)', () => {
+    renderApp();
+    // Query by DOM, not getByRole: the button is inert at scrollY 0, which
+    // removes it from the accessibility tree. It is still in the document.
+    expect(
+      document.querySelector('button[aria-label="Scroll to top"]'),
+    ).toBeInTheDocument();
+  });
+
   it('clicking the edit pencil on a card opens BookmarkFormModal in edit mode', async () => {
     const user = setupUser();
     vi.mocked(useBookmarks).mockReturnValue({

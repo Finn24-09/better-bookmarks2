@@ -7,6 +7,7 @@ import { TagFilter } from "./components/TagFilter";
 import { BookmarkCard } from "./components/BookmarkCard";
 import { FloatingFooter } from "./components/FloatingFooter";
 import { AddBookmarkButton } from "./components/AddBookmarkButton";
+import { ScrollToTopButton } from "./components/ScrollToTopButton";
 import { BookmarkFormModal } from "./components/BookmarkFormModal";
 import { ChangePasswordModal } from "./components/ChangePasswordModal";
 import { DeleteAccountModal } from "./components/DeleteAccountModal";
@@ -252,6 +253,8 @@ function AppContent() {
           </div>
         </div>
       </div>
+
+      <ScrollToTopButton />
 
       <FloatingFooter />
 
