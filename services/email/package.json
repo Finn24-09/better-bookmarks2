@@ -1,6 +1,6 @@
 {
   "name": "@better-bookmarks/email-service",
-  "version": "26.6.29",
+  "version": "26.6.29-1",
   "type": "module",
   "engines": {
     "node": "^22"
