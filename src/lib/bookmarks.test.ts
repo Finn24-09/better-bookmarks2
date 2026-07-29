@@ -337,6 +337,19 @@ describe('bookmarks', () => {
     expect(body.thumbnail_file_id).toBeNull();
   });
 
+  // key_version is rotation-integrity state, not user data: the DB stamps it
+  // from the caller's verified JWT (docker/db/init/13_key_version_stamp.sql).
+  // A client that started sending it would have its value discarded, but the
+  // frontend must not grow an opinion about rotation state in the first place.
+  it('createBookmark does NOT send key_version — the server stamps it (#135)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => bookmarkRow() });
+
+    await createBookmark({ title: TITLE, url: URL }, key, USER_ID);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.key_version).toBeUndefined();
+  });
+
   it('updateBookmark sends thumbnail_file_id when provided', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [{ id: 'bm-abc' }] });
 

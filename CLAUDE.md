@@ -252,6 +252,7 @@ Never break these. They are the core of the zero-knowledge architecture.
 - **HMAC tag deduplication** — `name_hmac = HMAC-SHA256(userId, tagName)`. The DB enforces `UNIQUE(user_id, name_hmac)` for tags without ever seeing the plaintext name. Always include `name_hmac` when creating a tag.
 - **`user_id` in mutations** — always include `user_id` in POST bodies for `bookmarks`, `tags`, and `thumbnail_images`. RLS enforces ownership but PostgREST needs the field in the body.
 - **Password change = key rotation** — changing password requires re-encrypting ALL bookmarks, tags, and thumbnails with the new key before calling the `change_password` RPC. The order matters: re-encrypt data first, then update credentials. The `RecoveryModal` handles the partial-rotation recovery path when the previous attempt was interrupted.
+- **`key_version` is stamped server-side, never sent by the client** — `key_version` records which key encrypted a row, so a new row must carry the owner's committed `auth.users.key_version`. `docker/db/init/13_key_version_stamp.sql` resolves it from the verified JWT `sub` in a `BEFORE INSERT` trigger and discards any value in the request body. The trigger is INSERT-only on purpose: re-encryption commits a rotation by PATCHing `key_version = targetVersion`, and a trigger on UPDATE would revert it. Do not "fix" a mismatch by raising the column DEFAULT — the correct value is per-user and changes over time (issue #135). The paired `auth.backfill_key_version()` restamps only rows *behind* their owner's version; rows *ahead* are the genuine interrupted-rotation signal and must survive.
 - **API error sanitization** — only 400/401/409 relay PostgREST messages. All other errors get a generic message. Do not change this without understanding the schema leakage risk.
 - **Email-service log redaction** — `LOG_REDACT_PATHS` (object paths) and `reqSerializer` (URL query strings) together prevent bearer JWTs, session cookies, and reset tokens from reaching stdout. Both must stay in sync.
 - **JWT audience pinning** — `api._sign_jwt` mints `aud=["email-svc","metadata-svc"]` (array). The email service verifies `audience: 'email-svc'`, the metadata-fetcher verifies `audience: 'metadata-svc'`; jose 6's set-membership semantics make a single token valid for both. PostgREST does not enforce `PGRST_JWT_AUD` so the extra claim is silently accepted. See `docker/db/init/11_jwt_audience.sql`.
@@ -310,6 +311,9 @@ Database init is in `docker/db/init/`:
 | `09_drop_legacy_delete.sql` | Removes pre-email-service delete RPC |
 | `10_password_change_notification_log.sql` | Audit trail for password changes |
 | `11_jwt_audience.sql` | Pins `aud` claim verification |
+| `12_encrypted_column_size_caps.sql` | `CHECK` length caps on every `*_enc` column |
+| `12_post_verify_jwt.sql` | `auth.mint_post_verify_jwt` — 5-min post-verification refresh window |
+| `13_key_version_stamp.sql` | Stamps `key_version` from the caller's JWT on INSERT + backfill |
 
 Bookmark listing always reads from `bookmarks_with_tags`, not `bookmarks` directly.
 

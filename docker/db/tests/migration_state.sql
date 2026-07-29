@@ -23,7 +23,7 @@
 
 BEGIN;
 
-SELECT plan(8);
+SELECT plan(10);
 
 -- --- Test 1: api.check_token_version() exists ---
 SELECT ok(
@@ -99,6 +99,33 @@ SELECT ok(
       AND p.proname = 'delete_account'
   ),
   'migration: api.delete_account() removed (email-confirmed deletion is the only path)'
+);
+
+-- --- Test 6: the three key_version stamping triggers exist (13_key_version_stamp.sql) ---
+SELECT is(
+  (SELECT count(*)::INTEGER
+     FROM pg_trigger t
+     JOIN pg_class c     ON c.oid = t.tgrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'api'
+      AND NOT t.tgisinternal
+      AND t.tgname IN ('bookmarks_stamp_key_version',
+                       'tags_stamp_key_version',
+                       'thumbnail_images_stamp_key_version')),
+  3,
+  'migration: key_version stamping triggers exist on all three encrypted tables'
+);
+
+-- --- Test 7: auth.backfill_key_version() exists (repair for pre-fix rows) ---
+SELECT ok(
+  EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'auth'
+      AND p.proname = 'backfill_key_version'
+      AND pg_get_function_identity_arguments(p.oid) = ''
+  ),
+  'migration: auth.backfill_key_version() exists'
 );
 
 SELECT * FROM finish();

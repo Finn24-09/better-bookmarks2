@@ -18,7 +18,7 @@ SELECT set_config('app.settings.jwt_secret', 'test-secret-must-be-at-least-32-ch
 
 BEGIN;
 
-SELECT plan(21);
+SELECT plan(33);
 
 -- Helper: catch an expected exception and compare the message.
 CREATE OR REPLACE FUNCTION _expect_error(sql TEXT, expected_msg TEXT, description TEXT)
@@ -254,6 +254,143 @@ SELECT ok(
     WHERE u.email = 'alice@test.com'
   ),
   'cascade: deleting user removes their thumbnail_images rows'
+);
+
+-- ===========================================================================
+-- key_version stamping (issue #135)
+--
+-- key_version records WHICH KEY encrypted a row, so a row created now must
+-- carry the owner's committed auth.users.key_version — resolved server-side
+-- from the verified JWT, never taken from the request body. Before
+-- 13_key_version_stamp.sql the column carried a constant DEFAULT 1, so every
+-- record written after an account rotated its key was born mislabelled as
+-- pre-rotation ciphertext and rotation_status() reported a partial rotation on
+-- every login for the rest of the account's life.
+-- ===========================================================================
+
+SELECT ok(
+  (SELECT r->>'user_id' IS NOT NULL FROM (SELECT api.sign_up('dave@test.com', 'Password1234') r) t),
+  'stamp: dave signed up'
+);
+
+-- Two completed password changes would have left dave at key_version 3.
+UPDATE auth.users SET key_version = 3 WHERE email = 'dave@test.com';
+
+SELECT set_config('request.jwt.claims',
+  json_build_object(
+    'sub',  (SELECT id::TEXT FROM auth.users WHERE email = 'dave@test.com'),
+    'role', 'app_user'
+  )::TEXT, true);
+
+SET LOCAL ROLE app_user;
+INSERT INTO api.bookmarks (user_id, title_enc, url_enc)
+VALUES (api.current_user_id(), 'enc_after_rotation', 'enc_url');
+RESET ROLE;
+
+SELECT is(
+  (SELECT key_version FROM api.bookmarks WHERE title_enc = 'enc_after_rotation'),
+  3,
+  'stamp: bookmark INSERT carries the owner''s committed key_version, not 1'
+);
+
+SET LOCAL ROLE app_user;
+INSERT INTO api.bookmarks (user_id, title_enc, url_enc, key_version)
+VALUES (api.current_user_id(), 'enc_forged', 'enc_url', 99);
+RESET ROLE;
+
+SELECT is(
+  (SELECT key_version FROM api.bookmarks WHERE title_enc = 'enc_forged'),
+  3,
+  'stamp: client-supplied key_version in the INSERT body is discarded'
+);
+
+SET LOCAL ROLE app_user;
+INSERT INTO api.tags (user_id, name_enc, name_hmac, key_version)
+VALUES (api.current_user_id(), 'enc_tag_after', 'hmac_dave', 99);
+RESET ROLE;
+
+SELECT is(
+  (SELECT key_version FROM api.tags WHERE name_enc = 'enc_tag_after'),
+  3,
+  'stamp: tag INSERT carries the owner''s committed key_version'
+);
+
+SET LOCAL ROLE app_user;
+INSERT INTO api.thumbnail_images (user_id, data_enc, original_name_enc, key_version)
+VALUES (api.current_user_id(), 'enc_thumb_after', 'enc_name', 99);
+RESET ROLE;
+
+SELECT is(
+  (SELECT key_version FROM api.thumbnail_images WHERE data_enc = 'enc_thumb_after'),
+  3,
+  'stamp: thumbnail_images INSERT carries the owner''s committed key_version'
+);
+
+-- The regression the issue is actually about: a record created after a
+-- completed rotation must not make the account look partially rotated.
+SET LOCAL ROLE app_user;
+SELECT is(
+  (SELECT (api.rotation_status()->>'has_stale_records')::BOOLEAN),
+  FALSE,
+  'stamp: rotation_status() stays clean for records created post-rotation (#135)'
+);
+RESET ROLE;
+
+-- The trigger is INSERT-only: re-encryption commits a rotation by PATCHing
+-- key_version, and that path must keep working.
+SET LOCAL ROLE app_user;
+UPDATE api.bookmarks SET key_version = 4 WHERE title_enc = 'enc_after_rotation';
+RESET ROLE;
+
+SELECT is(
+  (SELECT key_version FROM api.bookmarks WHERE title_enc = 'enc_after_rotation'),
+  4,
+  'stamp: trigger is INSERT-only — re-encryption can still advance key_version'
+);
+
+-- No JWT claims: not a PostgREST request. Superuser maintenance paths
+-- (pg_restore data loads, operator repairs) keep the value they supplied.
+SELECT set_config('request.jwt.claims', '{}', true);
+
+INSERT INTO api.bookmarks (user_id, title_enc, url_enc, key_version)
+SELECT id, 'enc_maintenance', 'enc_url', 7 FROM auth.users WHERE email = 'dave@test.com';
+
+SELECT is(
+  (SELECT key_version FROM api.bookmarks WHERE title_enc = 'enc_maintenance'),
+  7,
+  'stamp: INSERT with no JWT claims is left alone (restore / maintenance path)'
+);
+
+-- Backfill: a database written by the pre-fix code has rows BEHIND the owner's
+-- version (the bug) and may have rows AHEAD of it (a genuine interrupted
+-- rotation, ciphertext already under the new key). Only the former is repaired.
+INSERT INTO api.bookmarks (user_id, title_enc, url_enc, key_version)
+SELECT id, 'enc_behind', 'enc_url', 1 FROM auth.users WHERE email = 'dave@test.com';
+INSERT INTO api.bookmarks (user_id, title_enc, url_enc, key_version)
+SELECT id, 'enc_ahead', 'enc_url', 9 FROM auth.users WHERE email = 'dave@test.com';
+
+SELECT is(
+  (SELECT (auth.backfill_key_version()->>'bookmarks')::INTEGER),
+  1,
+  'backfill: restamps exactly the rows behind the owner''s key_version'
+);
+
+SELECT is(
+  (SELECT key_version FROM api.bookmarks WHERE title_enc = 'enc_behind'),
+  3,
+  'backfill: a row behind the owner''s version is restamped to it'
+);
+
+SELECT is(
+  (SELECT key_version FROM api.bookmarks WHERE title_enc = 'enc_ahead'),
+  9,
+  'backfill: a row ahead is left alone — the interrupted-rotation signal'
+);
+
+SELECT is(
+  (SELECT (auth.backfill_key_version()->>'bookmarks')::INTEGER),
+  0,
+  'backfill: is idempotent — a second run restamps nothing'
 );
 
 SELECT * FROM finish();
