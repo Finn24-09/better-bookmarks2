@@ -217,6 +217,31 @@ Changing or resetting the password requires re-encrypting everything because the
 
 `has_stale_records` is true when any of the user's bookmarks, tags, or thumbnails has `key_version <> auth.users.key_version` — i.e. a previous rotation committed the password update but not all data, or the inverse.
 
+### Stamping `key_version` on new records (issue #135)
+
+`key_version` records *which key encrypted this row*, so a row created now must carry the owner's currently **committed** `auth.users.key_version`. That value is per-user and changes over time, so it cannot come from a column default, and it must never come from the client — it is rotation-integrity state, not user data.
+
+`docker/db/init/13_key_version_stamp.sql` installs a `BEFORE INSERT` trigger on `api.bookmarks`, `api.tags` and `api.thumbnail_images` that resolves the value from the caller's verified JWT `sub` and overwrites whatever the request body contained. The trigger function `auth.stamp_key_version()` lives in `auth` rather than `api` because PostgREST exposes every function in its configured schema as an RPC endpoint, and it is `SECURITY DEFINER` with a pinned `search_path` because `app_user` holds no `SELECT` on `auth.users`.
+
+It is scoped to `INSERT` only, deliberately: `reencryptBookmark`, `reencryptTag` and the thumbnail PATCH are how a rotation commits, and each sends `key_version = targetVersion` explicitly. A trigger on `UPDATE` would silently revert exactly that.
+
+Before this file existed, `06_key_versioning.sql`'s constant `DEFAULT 1` applied to every insert. One password change plus one new bookmark was enough to make `rotation_status()` report `has_stale_records` on every subsequent login, pinning the session to `RecoveryModal` with no dismiss path — and completing that recovery incremented `key_version` again, so the next record recreated the trap. The ciphertext was never damaged; only the label was wrong.
+
+**Applying it to an existing deployment.** `/docker-entrypoint-initdb.d/` runs only on an empty volume, so restarting with a newer image does **not** apply this. Run it once against the live container:
+
+```
+docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -f /docker-entrypoint-initdb.d/13_key_version_stamp.sql
+```
+
+Expect a `NOTICE: key_version backfill: N bookmarks, N tags, N thumbnail_images restamped` line followed by `COMMIT`. The file is idempotent (`CREATE OR REPLACE`, `DROP TRIGGER IF EXISTS`, and the backfill matches nothing on a second run). No restart, no forced re-login — tokens issued before the migration keep working, because nothing about the JWT changed. Accounts stuck on "Incomplete Password Change Detected" are clear on their next `rotation_status()` call.
+
+On Git Bash for Windows, prefix the command with `MSYS_NO_PATHCONV=1`, or the container-absolute path is rewritten to a host path and `psql` reports "No such file or directory".
+
+`auth.backfill_key_version()` restamps only rows **behind** their owner's `key_version`. Those can only come from this bug — every completed rotation re-encrypts and restamps all of an account's rows before `change_password` commits — so they are encrypted with the current key and need a label change, never a ciphertext change. Rows **ahead** are the genuine interrupted-rotation signal and are deliberately left alone, so `RecoveryModal` still fires for accounts that really are mid-rotation.
+
+`migration_state.sql` asserts the triggers and the repair function exist, so a volume that never received the migration fails the pgTAP run rather than silently keeping the bug.
+
 ### Happy-path change-password (`ChangePasswordModal.tsx`)
 
 The modal uses a two-phase ordering chosen so an interrupted run leaves the DB recoverable on next login:
@@ -1036,6 +1061,10 @@ Postgres runs every script in `docker/db/init/` exactly once on first startup:
 | `08_email_tokens.sql`             | `email_tokens`, `email_send_log`, `security_audit_log`, all SECURITY DEFINER helpers, `check_token_version` pre-request hook, **canonical `_sign_jwt` (4-arg), `sign_up`, `sign_in`, and `change_password`** with JWT-claim upgrade (`tv`, `email_verified`) |
 | `09_drop_legacy_delete.sql`       | Idempotent `DROP FUNCTION IF EXISTS api.delete_account(TEXT)` — safety net for older volumes where the legacy RPC was previously created |
 | `10_password_change_notification_log.sql` | `auth.security_audit_log` enum extension for password-change notification events (must run in its own transaction; `ALTER TYPE ... ADD VALUE` cannot share a transaction with the values it adds) |
+| `11_jwt_audience.sql`             | Re-defines `_sign_jwt` to mint `aud=["email-svc","metadata-svc"]` so one session token authenticates both sibling backends |
+| `12_encrypted_column_size_caps.sql` | `CHECK` constraints capping the length of every `*_enc` column |
+| `12_post_verify_jwt.sql`          | `auth.mint_post_verify_jwt` — 5-minute post-verification window backing `POST /api/email/refresh-after-verify` |
+| `13_key_version_stamp.sql`        | `BEFORE INSERT` triggers stamping `key_version` from the caller's JWT on all three encrypted tables, plus `auth.backfill_key_version()` repairing rows mislabelled by the previous constant default (issue #135) |
 
 Re-running 08 against a database with the older `auth.reset_password_destroy_data` signature is safe — the script `DROP FUNCTION IF EXISTS` first because PostgreSQL refuses to rename input parameters via `CREATE OR REPLACE FUNCTION`.
 
