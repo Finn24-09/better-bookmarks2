@@ -18,6 +18,7 @@ beforeEach(() => {
 import {
   compressImage,
   uploadThumbnail,
+  uploadThumbnailFromBytes,
   fetchThumbnailObjectUrl,
   deleteThumbnailImage,
   reencryptThumbnail,
@@ -343,5 +344,28 @@ describe('reencryptThumbnailToBody', () => {
     expect(result.imageId).toBe('img-gone');
     expect(result.data_enc).toBe('');
     expect(result.original_name_enc).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// uploadThumbnailFromBytes — request body
+//
+// key_version is rotation-integrity state, not user data: the DB stamps it
+// from the caller's verified JWT (docker/db/init/13_key_version_stamp.sql).
+// uploadThumbnailFromBytes is used here rather than uploadThumbnail because it
+// skips compression and so needs no Canvas/Image stubbing; both build the same
+// POST body.
+// ---------------------------------------------------------------------------
+
+describe('uploadThumbnailFromBytes', () => {
+  it('does NOT send key_version — the server stamps it (#135)', async () => {
+    vi.mocked(apiFetch).mockResolvedValue([{ id: 'img-uuid-1' }]);
+    const key = await deriveKey('pass', 'user@example.com');
+
+    await uploadThumbnailFromBytes(new Uint8Array([0xff, 0xd8]), 'photo.jpg', key, 'user-uuid-123');
+
+    const body = JSON.parse(vi.mocked(apiFetch).mock.calls[0][1]!.body as string);
+    expect(body.key_version).toBeUndefined();
+    expect(body.user_id).toBe('user-uuid-123');
   });
 });

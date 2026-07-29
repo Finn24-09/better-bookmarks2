@@ -67,6 +67,17 @@ describe('tags', () => {
     expect(body.name_hmac).toBe(expectedHmac);
   });
 
+  // key_version is rotation-integrity state, not user data: the DB stamps it
+  // from the caller's verified JWT (docker/db/init/13_key_version_stamp.sql).
+  it('createTag does NOT send key_version — the server stamps it (#135)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => tagRow() });
+
+    await createTag('work', USER_ID, key);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.key_version).toBeUndefined();
+  });
+
   it('createTag returns the id and decrypted name', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => tagRow('tag-abc') });
 
