@@ -46,12 +46,18 @@ vi.mock('../../lib/tags', () => ({
 }));
 
 vi.mock('../../lib/thumbnails', () => ({
-  reencryptThumbnailToBody: vi.fn(),
+  reencryptThumbnailBatchToBodies: vi.fn(),
+  writeReencryptedThumbnail: vi.fn(),
 }));
 
-vi.mock('../../lib/api', () => ({
-  apiFetch: vi.fn().mockResolvedValue(undefined),
-}));
+// Keep the real ApiError: utils.ts classifies retryable failures with
+// `err instanceof ApiError`, and a wholesale mock strips it — turning that
+// check into a vitest "no export defined" throw that can make a test pass for
+// entirely the wrong reason.
+vi.mock('../../lib/api', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../lib/api')>();
+  return { ...mod, apiFetch: vi.fn().mockResolvedValue(undefined) };
+});
 
 vi.mock('../../lib/email', () => ({
   notifyPasswordChanged: vi.fn().mockResolvedValue(undefined),
@@ -68,7 +74,7 @@ import { changePassword, signIn, rotationStatus } from '../../lib/auth';
 import { deriveKey } from '../../lib/crypto';
 import { getBookmarks, reencryptBookmark } from '../../lib/bookmarks';
 import { getTags, reencryptTag } from '../../lib/tags';
-import { reencryptThumbnailToBody } from '../../lib/thumbnails';
+import { reencryptThumbnailBatchToBodies, writeReencryptedThumbnail } from '../../lib/thumbnails';
 import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
@@ -97,7 +103,10 @@ describe('ChangePasswordModal', () => {
     vi.mocked(getTags).mockResolvedValue([]);
     vi.mocked(reencryptBookmark).mockResolvedValue(undefined);
     vi.mocked(reencryptTag).mockResolvedValue(undefined);
-    vi.mocked(reencryptThumbnailToBody).mockResolvedValue({ imageId: '', data_enc: '', original_name_enc: '' });
+    vi.mocked(reencryptThumbnailBatchToBodies).mockImplementation(async (ids) =>
+      ids.map((imageId) => ({ imageId, data_enc: 'enc-data', original_name_enc: 'enc-name' })),
+    );
+    vi.mocked(writeReencryptedThumbnail).mockResolvedValue(undefined);
   });
 
   function renderModal(open = true, onClose = vi.fn()) {
@@ -260,15 +269,12 @@ describe('ChangePasswordModal', () => {
     });
   });
 
-  it('re-encrypts thumbnail binary files using two-phase approach (crypto then write)', async () => {
+  it('re-encrypts thumbnail binary files using a batched read before writing', async () => {
     const newKey = {} as CryptoKey;
     const bm = makeBookmark({ thumbnailFileId: 'img-1', thumbnailOriginalName: 'photo.jpg' });
     vi.mocked(deriveKey).mockResolvedValue(newKey);
     vi.mocked(changePassword).mockResolvedValue(undefined as never);
     vi.mocked(getBookmarks).mockResolvedValue([bm]);
-    vi.mocked(reencryptThumbnailToBody).mockResolvedValue({
-      imageId: 'img-1', data_enc: 'enc-data', original_name_enc: 'enc-name',
-    });
     const user = setupUser();
     renderModal();
 
@@ -278,9 +284,41 @@ describe('ChangePasswordModal', () => {
     await user.click(screen.getByRole('button', { name: /save password/i }));
 
     await waitFor(() => {
-      // Phase 1: crypto only — should be called with imageId + both keys
-      expect(reencryptThumbnailToBody).toHaveBeenCalledWith('img-1', mockCryptoKey, newKey);
+      // Reads are batched by id list — one request per thumbnail is what
+      // overran the nginx api_read budget and stranded partial rotations.
+      expect(reencryptThumbnailBatchToBodies).toHaveBeenCalledWith(
+        ['img-1'],
+        mockCryptoKey,
+        newKey,
+        undefined,
+      );
     });
+  });
+
+  it('writes no re-encrypted record when the thumbnail read fails', async () => {
+    const newKey = {} as CryptoKey;
+    const bm = makeBookmark({ thumbnailFileId: 'img-1', thumbnailOriginalName: 'photo.jpg' });
+    vi.mocked(deriveKey).mockResolvedValue(newKey);
+    vi.mocked(getBookmarks).mockResolvedValue([bm]);
+    vi.mocked(getTags).mockResolvedValue([{ id: 'tag-1', name: 'Work' }]);
+    vi.mocked(reencryptThumbnailBatchToBodies).mockRejectedValue(new Error('read failed'));
+    const user = setupUser();
+    renderModal();
+
+    await user.type(screen.getByPlaceholderText('Enter current password…'), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText('Enter new password…'), 'StrongPass12!');
+    await user.type(screen.getByPlaceholderText('Retype new password…'), 'StrongPass12!');
+    await user.click(screen.getByRole('button', { name: /save password/i }));
+
+    // The reported failure: bookmarks were PATCHed to the new key BEFORE the
+    // thumbnails were read, so a failed read left them encrypted under a key
+    // the unchanged password could not derive.
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled();
+    });
+    expect(reencryptBookmark).not.toHaveBeenCalled();
+    expect(reencryptTag).not.toHaveBeenCalled();
+    expect(changePassword).not.toHaveBeenCalled();
   });
 
   it('calls changePassword only after all re-encryption completes', async () => {

@@ -1,8 +1,8 @@
-import { apiFetch, apiFetchCount, ApiError } from './api';
+import { apiFetch, apiFetchCount } from './api';
 import { decryptBinary, bytesToBase64 } from './crypto';
 import { getBookmarks, type Bookmark } from './bookmarks';
 import { getTags } from './tags';
-import { runWithConcurrency } from './utils';
+import { runWithConcurrency, chunk, isAbortError, withRetry } from './utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,67 +99,6 @@ const RETRY_BASE_MS = 800;
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Matches on `name` rather than `instanceof Error` because aborts arrive as
-// DOMException, which does not inherit from Error in every environment we run
-// in (notably jsdom) — an instanceof check silently reclassifies a cancelled
-// export as a transport failure.
-function isAbortError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError';
-}
-
-/**
- * True for transport conditions that say nothing about the thumbnail itself and
- * may succeed on a later attempt: rate limiting, server-side faults, and
- * network failures (browsers reject `fetch` with a TypeError for those).
- */
-function isRetryableError(err: unknown): boolean {
-  if (err instanceof ApiError) return err.status === 429 || err.status >= 500;
-  return err instanceof TypeError;
-}
-
-/** Random 0..baseMs jitter so concurrent batches do not retry in lockstep. */
-function jitterMs(baseMs: number): number {
-  const buf = new Uint8Array(1);
-  crypto.getRandomValues(buf);
-  return Math.floor((buf[0] / 256) * baseMs);
-}
-
-/** Sleep that rejects immediately when the export is cancelled. */
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException('Export cancelled', 'AbortError'));
-      return;
-    }
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException('Export cancelled', 'AbortError'));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-/** Run `fn`, retrying only transient failures with exponential backoff. */
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  attempts: number,
-  baseMs: number,
-  signal?: AbortSignal,
-): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (isAbortError(err) || !isRetryableError(err) || attempt >= attempts) throw err;
-      await sleep(baseMs * 2 ** (attempt - 1) + jitterMs(baseMs), signal);
-    }
-  }
-}
-
 /** Fetch one batch of encrypted thumbnail rows, keyed by image id. */
 async function fetchThumbnailBatch(
   imageIds: string[],
@@ -184,12 +123,6 @@ async function toDataUri(key: CryptoKey, dataEnc: string, imageId: string): Prom
   }
 
   return `data:image/jpeg;base64,${bytesToBase64(bytes)}`;
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,9 +203,7 @@ export async function exportBookmarks(
         try {
           rowsById = await withRetry(
             () => fetchThumbnailBatch(batch.map((b) => b.thumbnailFileId!), signal),
-            attempts,
-            baseMs,
-            signal,
+            { attempts, baseMs, signal },
           );
         } catch (err) {
           if (isAbortError(err)) throw err;

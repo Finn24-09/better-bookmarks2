@@ -203,33 +203,76 @@ export async function reencryptThumbnail(
   });
 }
 
+/** A thumbnail row re-encrypted in memory, ready to be written. */
+export interface ThumbnailRotationBody {
+  imageId: string;
+  data_enc: string;
+  original_name_enc: string;
+}
+
 /**
- * Fetch, decrypt, and re-encrypt a thumbnail's binary data and original name
- * in memory — returns the encrypted body without writing to the DB.
- * Use this for the two-phase key rotation in ChangePasswordModal so all crypto
- * completes before any DB writes begin.
+ * Read every supplied thumbnail row in a SINGLE request, decrypt with oldKey
+ * and re-encrypt with newKey, returning the bodies without writing anything.
+ *
+ * One request per thumbnail is what overran Nginx's `api_read` limit_req zone
+ * during key rotation; the caller chunks ids and applies retry/concurrency.
+ *
+ * Throws if any requested id is absent from the response. The previous
+ * single-row version returned empty ciphertext instead, which the caller
+ * PATCHed straight back — so any response that yielded no rows for a row that
+ * does exist (including `apiFetch` returning undefined when a 200 body fails
+ * to parse) would overwrite live thumbnail data with an empty string.
  */
-export async function reencryptThumbnailToBody(
-  imageId: string,
+export async function reencryptThumbnailBatchToBodies(
+  imageIds: string[],
   oldKey: CryptoKey,
   newKey: CryptoKey,
-): Promise<{ imageId: string; data_enc: string; original_name_enc: string }> {
-  const rows = await apiFetch<{ data_enc: string; original_name_enc: string }[]>(
-    `/thumbnail_images?id=eq.${imageId}&select=data_enc,original_name_enc`,
+  signal?: AbortSignal,
+): Promise<ThumbnailRotationBody[]> {
+  if (imageIds.length === 0) return [];
+
+  const rows = await apiFetch<{ id: string; data_enc: string; original_name_enc: string }[]>(
+    `/thumbnail_images?id=in.(${imageIds.join(',')})&select=id,data_enc,original_name_enc`,
+    { signal },
   );
-  if (!rows?.length) return { imageId, data_enc: '', original_name_enc: '' };
 
-  const [imageBytes, originalName] = await Promise.all([
-    decryptBinary(oldKey, rows[0].data_enc),
-    decrypt(oldKey, rows[0].original_name_enc),
-  ]);
+  const byId = new Map((rows ?? []).map((r) => [r.id, r]));
 
-  const [newDataEnc, newOriginalNameEnc] = await Promise.all([
-    encryptBinary(newKey, imageBytes),
-    encrypt(newKey, originalName),
-  ]);
+  return Promise.all(
+    imageIds.map(async (imageId) => {
+      const row = byId.get(imageId);
+      if (!row) {
+        throw new Error(`Thumbnail ${imageId} could not be read`);
+      }
 
-  return { imageId, data_enc: newDataEnc, original_name_enc: newOriginalNameEnc };
+      const [imageBytes, originalName] = await Promise.all([
+        decryptBinary(oldKey, row.data_enc),
+        decrypt(oldKey, row.original_name_enc),
+      ]);
+
+      const [newDataEnc, newOriginalNameEnc] = await Promise.all([
+        encryptBinary(newKey, imageBytes),
+        encrypt(newKey, originalName),
+      ]);
+
+      return { imageId, data_enc: newDataEnc, original_name_enc: newOriginalNameEnc };
+    }),
+  );
+}
+
+/** Write one re-encrypted thumbnail body, stamping the rotation's key version. */
+export async function writeReencryptedThumbnail(
+  body: ThumbnailRotationBody,
+  targetVersion: number,
+): Promise<void> {
+  await apiFetch(`/thumbnail_images?id=eq.${body.imageId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      data_enc: body.data_enc,
+      original_name_enc: body.original_name_enc,
+      key_version: targetVersion,
+    }),
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -15,10 +15,9 @@ import { PasswordStrengthHints } from "./PasswordStrengthHints";
 import { changePassword, signIn, rotationStatus } from "../../lib/auth";
 import { notifyPasswordChanged } from "../../lib/email";
 import { deriveKey } from "../../lib/crypto";
-import { getBookmarks, reencryptBookmark } from "../../lib/bookmarks";
-import { getTags, reencryptTag } from "../../lib/tags";
-import { reencryptThumbnailToBody } from "../../lib/thumbnails";
-import { apiFetch } from "../../lib/api";
+import { getBookmarks } from "../../lib/bookmarks";
+import { getTags } from "../../lib/tags";
+import { reencryptRecords } from "../../lib/keyRotation";
 import { useAuth } from "../contexts/AuthContext";
 
 interface ChangePasswordModalProps {
@@ -84,28 +83,21 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
         getTags(cryptoKey),
       ]);
 
-      // Re-encrypt bookmark fields (title, url, thumbnail URL).
-      await Promise.all(allBookmarks.map((bm) => reencryptBookmark(bm, newKey, targetVersion)));
-
-      // Re-encrypt thumbnail binary files using a two-phase approach:
-      // Phase 1: all crypto in memory (no DB writes yet).
-      // Phase 2: all DB writes (no crypto). Cleaner failure modes if interrupted.
-      const thumbBodies = await Promise.all(
-        allBookmarks
+      // Re-encrypt everything with the new key and stamp targetVersion.
+      // reencryptRecords completes every read before issuing any write and
+      // bounds the fan-out, so a rate-limited request can no longer leave
+      // records encrypted under a key the password does not yet derive.
+      // Tag name_hmac is keyed on userId, not the password, so it is unchanged.
+      await reencryptRecords({
+        bookmarks: allBookmarks,
+        thumbnailImageIds: allBookmarks
           .filter((bm) => bm.thumbnailFileId)
-          .map((bm) => reencryptThumbnailToBody(bm.thumbnailFileId!, cryptoKey, newKey)),
-      );
-      await Promise.all(
-        thumbBodies.map(({ imageId, data_enc, original_name_enc }) =>
-          apiFetch(`/thumbnail_images?id=eq.${imageId}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ data_enc, original_name_enc, key_version: targetVersion }),
-          }),
-        ),
-      );
-
-      // Re-encrypt tag names (name_hmac is keyed on userId, not password — unchanged).
-      await Promise.all(allTags.map((tag) => reencryptTag(tag.id, tag.name, newKey, targetVersion)));
+          .map((bm) => bm.thumbnailFileId!),
+        tags: allTags,
+        oldKey: cryptoKey,
+        newKey,
+        targetVersion,
+      });
 
       // Notify by email BEFORE the password change — at this point the JWT
       // is unambiguously valid (token_version not yet incremented, in-memory

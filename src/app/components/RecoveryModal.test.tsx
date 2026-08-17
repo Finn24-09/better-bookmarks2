@@ -44,12 +44,18 @@ vi.mock('../../lib/tags', () => ({
 }));
 
 vi.mock('../../lib/thumbnails', () => ({
-  reencryptThumbnailToBody: vi.fn(),
+  reencryptThumbnailBatchToBodies: vi.fn(),
+  writeReencryptedThumbnail: vi.fn(),
 }));
 
-vi.mock('../../lib/api', () => ({
-  apiFetch: vi.fn().mockResolvedValue(undefined),
-}));
+// Keep the real ApiError: utils.ts classifies retryable failures with
+// `err instanceof ApiError`, and a wholesale mock strips it — turning that
+// check into a vitest "no export defined" throw that can make a test pass for
+// entirely the wrong reason.
+vi.mock('../../lib/api', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../lib/api')>();
+  return { ...mod, apiFetch: vi.fn().mockResolvedValue(undefined) };
+});
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -59,8 +65,7 @@ import { signIn, changePassword, rotationStatus } from '../../lib/auth';
 import { deriveKey } from '../../lib/crypto';
 import { getBookmarkRows, reencryptBookmark, decryptBookmark } from '../../lib/bookmarks';
 import { getTagRows, reencryptTag } from '../../lib/tags';
-import { reencryptThumbnailToBody } from '../../lib/thumbnails';
-import { apiFetch } from '../../lib/api';
+import { reencryptThumbnailBatchToBodies, writeReencryptedThumbnail } from '../../lib/thumbnails';
 import { toast } from 'sonner';
 
 // ---------------------------------------------------------------------------
@@ -103,9 +108,10 @@ describe('RecoveryModal', () => {
       thumbnailUrl: null, thumbnailFileId: null, thumbnailOriginalName: null,
       tagIds: [], createdAt: '', updatedAt: '', keyVersion: 1, thumbnailKeyVersion: null,
     });
-    vi.mocked(reencryptThumbnailToBody).mockResolvedValue({
-      imageId: '', data_enc: '', original_name_enc: '',
-    });
+    vi.mocked(reencryptThumbnailBatchToBodies).mockImplementation(async (ids) =>
+      ids.map((imageId) => ({ imageId, data_enc: 'enc', original_name_enc: 'encn' })),
+    );
+    vi.mocked(writeReencryptedThumbnail).mockResolvedValue(undefined);
   });
 
   function renderModal(keyVersion = 2) {
@@ -244,14 +250,13 @@ describe('RecoveryModal', () => {
   // -------------------------------------------------------------------------
   // Thumbnail re-encryption
   // -------------------------------------------------------------------------
-  it('calls reencryptThumbnailToBody only for stale thumbnails', async () => {
+  it('reads only stale thumbnails, in a single batched request', async () => {
     const newKey = {} as CryptoKey;
     vi.mocked(deriveKey).mockResolvedValue(newKey);
     vi.mocked(rotationStatus).mockResolvedValue({ keyVersion: 1, hasStaleRecords: true });
     const staleBm = makeBookmarkRow({ id: 'bm-1', key_version: 1, thumbnail_file_id: 'img-1', thumbnail_key_version: 1 });
     const doneBm  = makeBookmarkRow({ id: 'bm-2', key_version: 2, thumbnail_file_id: 'img-2', thumbnail_key_version: 2 });
     vi.mocked(getBookmarkRows).mockResolvedValue([staleBm, doneBm]);
-    vi.mocked(reencryptThumbnailToBody).mockResolvedValue({ imageId: 'img-1', data_enc: 'enc', original_name_enc: 'encn' });
 
     const user = setupUser();
     renderModal(2);
@@ -260,16 +265,22 @@ describe('RecoveryModal', () => {
     await user.click(screen.getByRole('button', { name: /recover/i }));
 
     await waitFor(() => {
-      expect(reencryptThumbnailToBody).toHaveBeenCalledTimes(1);
-      expect(reencryptThumbnailToBody).toHaveBeenCalledWith('img-1', mockCryptoKey, newKey);
+      expect(reencryptThumbnailBatchToBodies).toHaveBeenCalledTimes(1);
+      // img-2 is already at the target version — re-encrypting it with a
+      // freshly derived key would strand it.
+      expect(reencryptThumbnailBatchToBodies).toHaveBeenCalledWith(
+        ['img-1'],
+        mockCryptoKey,
+        newKey,
+        undefined,
+      );
     });
   });
 
-  it('Phase 2 thumbnail PATCH includes key_version: targetVersion', async () => {
+  it('stamps targetVersion on the thumbnail write', async () => {
     vi.mocked(rotationStatus).mockResolvedValue({ keyVersion: 1, hasStaleRecords: true });
     const staleBm = makeBookmarkRow({ id: 'bm-1', key_version: 1, thumbnail_file_id: 'img-1', thumbnail_key_version: 1 });
     vi.mocked(getBookmarkRows).mockResolvedValue([staleBm]);
-    vi.mocked(reencryptThumbnailToBody).mockResolvedValue({ imageId: 'img-1', data_enc: 'enc', original_name_enc: 'encn' });
 
     const user = setupUser();
     renderModal(2);
@@ -278,13 +289,33 @@ describe('RecoveryModal', () => {
     await user.click(screen.getByRole('button', { name: /recover/i }));
 
     await waitFor(() => {
-      const patchCall = vi.mocked(apiFetch).mock.calls.find(
-        ([url]) => (url as string).includes('/thumbnail_images'),
+      expect(writeReencryptedThumbnail).toHaveBeenCalledWith(
+        expect.objectContaining({ imageId: 'img-1' }),
+        2,
       );
-      expect(patchCall).toBeDefined();
-      const body = JSON.parse(patchCall![1]!.body as string);
-      expect(body.key_version).toBe(2);
     });
+  });
+
+  it('writes nothing when the stale thumbnail read fails', async () => {
+    vi.mocked(rotationStatus).mockResolvedValue({ keyVersion: 1, hasStaleRecords: true });
+    const staleBm = makeBookmarkRow({ id: 'bm-1', key_version: 1, thumbnail_file_id: 'img-1', thumbnail_key_version: 1 });
+    vi.mocked(getBookmarkRows).mockResolvedValue([staleBm]);
+    vi.mocked(reencryptThumbnailBatchToBodies).mockRejectedValue(new Error('read failed'));
+
+    const user = setupUser();
+    renderModal(2);
+    await user.type(screen.getByPlaceholderText(/current password/i), 'OldPass123!');
+    await user.type(screen.getByPlaceholderText(/new password/i), 'NewPass456@');
+    await user.click(screen.getByRole('button', { name: /recover/i }));
+
+    // Recovery must not half-apply: the modal exists to repair exactly this
+    // state, so it cannot be allowed to deepen it.
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled();
+    });
+    expect(reencryptBookmark).not.toHaveBeenCalled();
+    expect(writeReencryptedThumbnail).not.toHaveBeenCalled();
+    expect(changePassword).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
