@@ -196,7 +196,7 @@ src/
     ├── email.ts        # Email-service client: reset, verify, resend, delete, password-change notify
     ├── bookmarks.ts    # getBookmarks / createBookmark / updateBookmark / deleteBookmark / reencryptBookmark
     ├── tags.ts         # getTags / createTag / deleteTag / reencryptTag / setBookmarkTags
-    ├── thumbnails.ts   # compressImage / uploadThumbnail / fetchThumbnailObjectUrl / reencryptThumbnail
+    ├── thumbnails.ts   # compressImage / uploadThumbnail / fetchThumbnailObjectUrl / reencryptThumbnailBatchToBodies
     ├── crypto.ts       # deriveKey / encrypt / decrypt / encryptBinary / decryptBinary / computeHmac
     ├── export.ts       # exportBookmarks / exportToCsv / triggerDownload
     ├── csv.ts          # parseCsvText / validateCsvFile (RFC 4180, no deps)

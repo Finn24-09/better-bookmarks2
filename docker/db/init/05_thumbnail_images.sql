@@ -83,7 +83,8 @@ CREATE POLICY thumb_delete ON api.thumbnail_images
   FOR DELETE TO app_user
   USING (user_id = api.current_user_id());
 
--- UPDATE policy: required for key rotation (reencryptThumbnail PATCHes data_enc + original_name_enc).
+-- UPDATE policy: required for key rotation (writeReencryptedThumbnail PATCHes
+-- data_enc + original_name_enc + key_version).
 -- Users may only update their own images.
 CREATE POLICY thumb_update ON api.thumbnail_images
   FOR UPDATE TO app_user
