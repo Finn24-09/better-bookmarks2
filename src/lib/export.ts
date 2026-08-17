@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchCount } from './api';
+import { apiFetch, apiFetchCount, ApiError } from './api';
 import { decryptBinary, bytesToBase64 } from './crypto';
 import { getBookmarks, type Bookmark } from './bookmarks';
 import { getTags } from './tags';
@@ -12,10 +12,18 @@ export interface ExportOptions {
   format: 'json' | 'csv';
   /** Include uploaded thumbnail images as base64 data URIs. Default: true for JSON. */
   includeThumbnails: boolean;
-  /** Max parallel thumbnail fetches. Default: 3. */
+  /** Max parallel thumbnail batches in flight. Default: 3. */
   thumbnailConcurrency?: number;
-  /** What to do when a single thumbnail fetch/decrypt fails. */
+  /**
+   * What to do when a single thumbnail row is permanently unusable (missing
+   * row, undecryptable payload, not a JPEG). Transient transport failures are
+   * never governed by this — they are retried and then fatal either way.
+   */
   thumbnailErrorPolicy: 'skip' | 'abort';
+  /** Attempts per thumbnail batch before a transient failure becomes fatal. Default: 3. */
+  thumbnailRetryAttempts?: number;
+  /** Base backoff between batch retries, in ms. Default: 800. */
+  thumbnailRetryBaseMs?: number;
 }
 
 export interface ExportProgress {
@@ -24,6 +32,12 @@ export interface ExportProgress {
   /** 0 means total is not yet known. */
   total: number;
   message: string;
+  /**
+   * Thumbnails permanently omitted from the export so far. Emitted on
+   * `thumbnails`-phase events so the UI can warn that the backup is
+   * incomplete instead of reporting an unqualified success.
+   */
+  skipped?: number;
 }
 
 export type ExportThumbnail =
@@ -58,27 +72,109 @@ const PAGE_SIZE = 100;
 // PAGE_SIZE = 50 pages; we round up to 100 for headroom. (CR-024)
 const MAX_PAGES = 100;
 
+// Thumbnail rows fetched per request via PostgREST `id=in.(...)`.
+//
+// One request per thumbnail overran Nginx's `api_read` limit_req zone
+// (rate=60r/m, burst=20 — ~21 requests per short burst, shared with the
+// bookmark grid's own thumbnail loads), so a 23-thumbnail export needed 25
+// requests and silently lost whatever nginx 429'd. Batching by 10 turns that
+// into 3 requests.
+//
+// 10 rather than a larger chunk because `thumbnail_images.data_enc` is capped
+// at 4 MiB per row (docker/db/init/12_encrypted_column_size_caps.sql), so a
+// batch holds up to 40 MiB of ciphertext plus its base64 expansion in memory —
+// bounded enough to survive a phone, with `thumbnailConcurrency` batches in
+// flight. Real rows are ~40 KB (480x270 JPEG q0.75). The id list also stays
+// far inside nginx's 8 KB request-line limit (10 UUIDs is ~380 bytes).
+const THUMBNAIL_BATCH_SIZE = 10;
+
+const RETRY_ATTEMPTS = 3;
+
+// The api_read bucket drains at 1 request/second, so a sub-second retry is
+// guaranteed to be rejected again. 800 ms doubling gives the bucket time to
+// refill between attempts.
+const RETRY_BASE_MS = 800;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Matches on `name` rather than `instanceof Error` because aborts arrive as
+// DOMException, which does not inherit from Error in every environment we run
+// in (notably jsdom) — an instanceof check silently reclassifies a cancelled
+// export as a transport failure.
 function isAbortError(err: unknown): boolean {
-  return err instanceof Error && err.name === 'AbortError';
+  return typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError';
 }
 
-/** Fetch and decrypt a thumbnail image, returning a base64 data URI. */
-async function fetchThumbnailAsDataUri(
-  imageId: string,
-  key: CryptoKey,
+/**
+ * True for transport conditions that say nothing about the thumbnail itself and
+ * may succeed on a later attempt: rate limiting, server-side faults, and
+ * network failures (browsers reject `fetch` with a TypeError for those).
+ */
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status === 429 || err.status >= 500;
+  return err instanceof TypeError;
+}
+
+/** Random 0..baseMs jitter so concurrent batches do not retry in lockstep. */
+function jitterMs(baseMs: number): number {
+  const buf = new Uint8Array(1);
+  crypto.getRandomValues(buf);
+  return Math.floor((buf[0] / 256) * baseMs);
+}
+
+/** Sleep that rejects immediately when the export is cancelled. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Export cancelled', 'AbortError'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Export cancelled', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** Run `fn`, retrying only transient failures with exponential backoff. */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  attempts: number,
+  baseMs: number,
   signal?: AbortSignal,
-): Promise<string> {
-  const rows = await apiFetch<{ data_enc: string }[]>(
-    `/thumbnail_images?id=eq.${imageId}&select=data_enc`,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (isAbortError(err) || !isRetryableError(err) || attempt >= attempts) throw err;
+      await sleep(baseMs * 2 ** (attempt - 1) + jitterMs(baseMs), signal);
+    }
+  }
+}
+
+/** Fetch one batch of encrypted thumbnail rows, keyed by image id. */
+async function fetchThumbnailBatch(
+  imageIds: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const rows = await apiFetch<{ id: string; data_enc: string }[]>(
+    `/thumbnail_images?id=in.(${imageIds.join(',')})&select=id,data_enc`,
     { signal },
   );
-  if (!rows?.length) throw new Error(`Thumbnail ${imageId} not found`);
+  return new Map((rows ?? []).map((r) => [r.id, r.data_enc]));
+}
 
-  const bytes = await decryptBinary(key, rows[0].data_enc);
+/** Decrypt one encrypted thumbnail payload into a base64 data URI. */
+async function toDataUri(key: CryptoKey, dataEnc: string, imageId: string): Promise<string> {
+  const bytes = await decryptBinary(key, dataEnc);
 
   // Defense-in-depth: assert JPEG magic bytes before embedding.
   // AES-GCM integrity prevents server tampering, but validates data stored
@@ -88,6 +184,12 @@ async function fetchThumbnailAsDataUri(
   }
 
   return `data:image/jpeg;base64,${bytesToBase64(bytes)}`;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,31 +258,68 @@ export async function exportBookmarks(
   if (options.includeThumbnails) {
     const withThumbs = allBookmarks.filter((b) => b.thumbnailFileId !== null);
     const thumbTotal = withThumbs.length;
+    const attempts = options.thumbnailRetryAttempts ?? RETRY_ATTEMPTS;
+    const baseMs = options.thumbnailRetryBaseMs ?? RETRY_BASE_MS;
     let thumbDone = 0;
+    let thumbSkipped = 0;
 
     await runWithConcurrency(
-      withThumbs,
-      async (bookmark) => {
+      chunk(withThumbs, THUMBNAIL_BATCH_SIZE),
+      async (batch) => {
+        let rowsById: Map<string, string>;
         try {
-          const dataUri = await fetchThumbnailAsDataUri(bookmark.thumbnailFileId!, key, signal);
-          thumbnailMap.set(bookmark.id, {
-            type: 'data',
-            value: dataUri,
-            originalName: bookmark.thumbnailOriginalName ?? 'thumbnail.jpg',
-          });
+          rowsById = await withRetry(
+            () => fetchThumbnailBatch(batch.map((b) => b.thumbnailFileId!), signal),
+            attempts,
+            baseMs,
+            signal,
+          );
         } catch (err) {
           if (isAbortError(err)) throw err;
-          if (options.thumbnailErrorPolicy === 'abort') throw err;
-          // skip policy: record null and continue
-          thumbnailMap.set(bookmark.id, null);
+          // A batch that could not be read at all is an infrastructure failure
+          // affecting up to THUMBNAIL_BATCH_SIZE thumbnails, not a defect in any
+          // one of them. Silently nulling them produced backups that looked
+          // complete but were missing most images, so this is always fatal —
+          // thumbnailErrorPolicy governs per-row defects only.
+          throw new Error(
+            `Could not download all thumbnails after ${attempts} attempt(s). ` +
+              'The export was stopped rather than saving a file with silently missing ' +
+              `thumbnails. (${err instanceof Error ? err.message : String(err)})`,
+          );
         }
-        thumbDone++;
-        emit({
-          phase: 'thumbnails',
-          current: thumbDone,
-          total: thumbTotal,
-          message: `Fetching thumbnail ${thumbDone} of ${thumbTotal}`,
-        });
+
+        // The fetch resolving does not mean the export is still wanted.
+        if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+
+        for (const bookmark of batch) {
+          try {
+            const dataEnc = rowsById.get(bookmark.thumbnailFileId!);
+            if (dataEnc === undefined) {
+              throw new Error(`Thumbnail ${bookmark.thumbnailFileId} not found`);
+            }
+            thumbnailMap.set(bookmark.id, {
+              type: 'data',
+              value: await toDataUri(key, dataEnc, bookmark.thumbnailFileId!),
+              originalName: bookmark.thumbnailOriginalName ?? 'thumbnail.jpg',
+            });
+          } catch (err) {
+            if (isAbortError(err)) throw err;
+            if (options.thumbnailErrorPolicy === 'abort') throw err;
+            // The row is permanently unusable (orphaned, undecryptable, or not
+            // a JPEG). Retrying cannot help, so record the omission and report
+            // the count so the user knows the backup is incomplete.
+            thumbnailMap.set(bookmark.id, null);
+            thumbSkipped++;
+          }
+          thumbDone++;
+          emit({
+            phase: 'thumbnails',
+            current: thumbDone,
+            total: thumbTotal,
+            message: `Fetching thumbnail ${thumbDone} of ${thumbTotal}`,
+            skipped: thumbSkipped,
+          });
+        }
       },
       options.thumbnailConcurrency ?? 3,
       signal,

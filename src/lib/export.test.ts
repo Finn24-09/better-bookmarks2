@@ -4,10 +4,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Module mocks — hoisted by Vitest before any imports
 // ---------------------------------------------------------------------------
 
-vi.mock('./api', () => ({
-  apiFetch: vi.fn(),
-  apiFetchCount: vi.fn().mockResolvedValue(null),
-}));
+// Keep the real ApiError class so retry-classification tests can construct
+// genuine status-carrying errors, but stub the two network entry points.
+vi.mock('./api', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./api')>();
+  return { ...mod, apiFetch: vi.fn(), apiFetchCount: vi.fn().mockResolvedValue(null) };
+});
 
 vi.mock('./bookmarks', () => ({
   getBookmarks: vi.fn(),
@@ -27,7 +29,7 @@ vi.mock('./crypto', async (importOriginal) => {
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { apiFetch, apiFetchCount } from './api';
+import { apiFetch, apiFetchCount, ApiError } from './api';
 import { getBookmarks } from './bookmarks';
 import { getTags } from './tags';
 import { decryptBinary } from './crypto';
@@ -273,7 +275,7 @@ describe('exportBookmarks — thumbnails', () => {
   it('embeds uploaded thumbnail as data URI when includeThumbnails is true', async () => {
     const bm = makeBookmark({ thumbnailFileId: 'img-1', thumbnailOriginalName: 'photo.jpg' });
     vi.mocked(getBookmarks).mockResolvedValueOnce([bm]);
-    vi.mocked(apiFetch).mockResolvedValue([{ data_enc: 'encrypted' }]);
+    vi.mocked(apiFetch).mockResolvedValue([{ id: 'img-1', data_enc: 'encrypted' }]);
     vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
 
     const result = await exportBookmarks(FAKE_KEY, { ...DEFAULT_OPTIONS, includeThumbnails: true });
@@ -289,13 +291,13 @@ describe('exportBookmarks — thumbnails', () => {
   it('apiFetch is called with the correct thumbnail_images endpoint', async () => {
     const bm = makeBookmark({ thumbnailFileId: 'img-abc' });
     vi.mocked(getBookmarks).mockResolvedValueOnce([bm]);
-    vi.mocked(apiFetch).mockResolvedValue([{ data_enc: 'enc' }]);
+    vi.mocked(apiFetch).mockResolvedValue([{ id: 'img-abc', data_enc: 'enc' }]);
     vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
 
     await exportBookmarks(FAKE_KEY, { ...DEFAULT_OPTIONS, includeThumbnails: true });
 
     expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(
-      expect.stringContaining('/thumbnail_images?id=eq.img-abc'),
+      expect.stringContaining('/thumbnail_images?id=in.(img-abc)'),
       expect.anything(),
     );
   });
@@ -328,27 +330,24 @@ describe('exportBookmarks — thumbnails', () => {
     ).rejects.toThrow();
   });
 
-  it('thumbnailErrorPolicy skip: continues after fetch failure on one thumbnail', async () => {
+  it('thumbnailErrorPolicy skip: a whole-batch fetch failure is still fatal', async () => {
     const bm1 = makeBookmark({ id: 'bm-1', thumbnailFileId: 'img-1' });
     const bm2 = makeBookmark({ id: 'bm-2', thumbnailFileId: 'img-2' });
     const bm3 = makeBookmark({ id: 'bm-3', thumbnailFileId: 'img-3' });
     vi.mocked(getBookmarks).mockResolvedValueOnce([bm1, bm2, bm3]);
 
-    vi.mocked(apiFetch).mockImplementation(async (path: string) => {
-      if ((path as string).includes('img-2')) throw new Error('fetch failed');
-      return [{ data_enc: 'enc' }];
-    });
+    vi.mocked(apiFetch).mockRejectedValue(new Error('fetch failed'));
     vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
 
-    const result = await exportBookmarks(
-      FAKE_KEY,
-      { ...DEFAULT_OPTIONS, includeThumbnails: true, thumbnailErrorPolicy: 'skip' },
-    );
-
-    expect(result.bookmarks).toHaveLength(3);
-    expect(result.bookmarks[1].thumbnail).toBeNull(); // bm-2 failed
-    expect(result.bookmarks[0].thumbnail?.type).toBe('data');
-    expect(result.bookmarks[2].thumbnail?.type).toBe('data');
+    // The skip policy covers per-row defects only. A batch that cannot be read
+    // at all would silently drop every thumbnail in it, which is exactly the
+    // backup-looks-complete-but-isn't failure this export had.
+    await expect(
+      exportBookmarks(
+        FAKE_KEY,
+        { ...DEFAULT_OPTIONS, includeThumbnails: true, thumbnailErrorPolicy: 'skip' },
+      ),
+    ).rejects.toThrow('fetch failed');
   });
 
   it('thumbnailErrorPolicy abort: rejects on first thumbnail failure', async () => {
@@ -387,20 +386,22 @@ describe('exportBookmarks — thumbnails', () => {
   });
 
   it('concurrency is bounded by thumbnailConcurrency option', async () => {
-    const bookmarks = Array.from({ length: 6 }, (_, i) =>
-      makeBookmark({ thumbnailFileId: `img-${i}` }),
+    // 45 thumbnails spans several batches — with fewer than one batch's worth
+    // there is only ever one request in flight and the bound is untested.
+    const bookmarks = Array.from({ length: 45 }, (_, i) =>
+      makeBookmark({ id: `bm-${i}`, thumbnailFileId: `img-${i}` }),
     );
     vi.mocked(getBookmarks).mockResolvedValueOnce(bookmarks);
 
     let inFlight = 0;
     let maxInFlight = 0;
 
-    vi.mocked(apiFetch).mockImplementation(async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise<void>((r) => setTimeout(r, 10));
       inFlight--;
-      return [{ data_enc: 'enc' }];
+      return idsFromBatchPath(path as string).map((id) => ({ id, data_enc: `enc-${id}` }));
     });
     vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
 
@@ -409,7 +410,266 @@ describe('exportBookmarks — thumbnails', () => {
       { ...DEFAULT_OPTIONS, includeThumbnails: true, thumbnailConcurrency: 2 },
     );
 
-    expect(maxInFlight).toBeLessThanOrEqual(2);
+    expect(maxInFlight).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batched fetching + transient-failure handling
+//
+// Regression cover for the silent thumbnail loss: one request per thumbnail
+// overran nginx's api_read limit_req zone (rate=60r/m burst=20), and every
+// resulting 429 was swallowed into `thumbnail: null` under the skip policy.
+// ---------------------------------------------------------------------------
+
+/** Extract the id list from a PostgREST `id=in.(a,b,c)` query path. */
+function idsFromBatchPath(path: string): string[] {
+  const m = path.match(/id=in\.\(([^)]*)\)/);
+  if (!m) throw new Error(`expected a batched id=in.() request, got: ${path}`);
+  return m[1].split(',').filter(Boolean);
+}
+
+/** Build a batch response carrying one row per requested id. */
+function batchRows(path: string): { id: string; data_enc: string }[] {
+  return idsFromBatchPath(path).map((id) => ({ id, data_enc: `enc-${id}` }));
+}
+
+function makeThumbBookmarks(count: number): Bookmark[] {
+  return Array.from({ length: count }, (_, i) =>
+    makeBookmark({ id: `bm-${i}`, thumbnailFileId: `img-${i}`, thumbnailOriginalName: `p${i}.jpg` }),
+  );
+}
+
+const FAST_RETRY: Partial<ExportOptions> = { thumbnailRetryBaseMs: 1 };
+
+describe('exportBookmarks — batched thumbnail fetching', () => {
+  it('fetches 23 thumbnails in a handful of batched requests rather than one each', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(23));
+    vi.mocked(apiFetch).mockImplementation(async (path) => batchRows(path as string));
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    await exportBookmarks(FAKE_KEY, { ...DEFAULT_OPTIONS, includeThumbnails: true });
+
+    // 23 single-row requests is what exhausted the nginx budget. A batched
+    // export must stay far below that.
+    expect(vi.mocked(apiFetch).mock.calls.length).toBeLessThanOrEqual(4);
+    expect(vi.mocked(apiFetch).mock.calls[0][0]).toContain('id=in.(');
+  });
+
+  it('embeds every one of 23 thumbnails when fetched in batches', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(23));
+    vi.mocked(apiFetch).mockImplementation(async (path) => batchRows(path as string));
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    const result = await exportBookmarks(FAKE_KEY, { ...DEFAULT_OPTIONS, includeThumbnails: true });
+
+    const embedded = result.bookmarks.filter((b) => b.thumbnail?.type === 'data');
+    expect(embedded).toHaveLength(23);
+  });
+
+  it('requests id and data_enc so rows can be matched back to their bookmark', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(2));
+    vi.mocked(apiFetch).mockImplementation(async (path) => batchRows(path as string));
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    await exportBookmarks(FAKE_KEY, { ...DEFAULT_OPTIONS, includeThumbnails: true });
+
+    const path = vi.mocked(apiFetch).mock.calls[0][0] as string;
+    expect(path).toMatch(/select=(id,data_enc|data_enc,id)/);
+  });
+
+  it('maps each batched row to the right bookmark', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(3));
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      // Return rows in reverse order to prove mapping is by id, not by position.
+      return batchRows(path as string).reverse();
+    });
+    vi.mocked(decryptBinary).mockImplementation(async (_key, enc) =>
+      // Encode the row identity into the bytes so we can assert the pairing.
+      new Uint8Array([0xff, 0xd8, 0xff, (enc as string).charCodeAt((enc as string).length - 1)]),
+    );
+
+    const result = await exportBookmarks(FAKE_KEY, { ...DEFAULT_OPTIONS, includeThumbnails: true });
+
+    // bm-0 must carry the bytes derived from enc-img-0, i.e. last char '0'.
+    const thumb0 = result.bookmarks.find((b) => b.title === 'Test Bookmark' && b.thumbnail?.type === 'data');
+    expect(thumb0).toBeDefined();
+    const expected = `data:image/jpeg;base64,${btoa(String.fromCharCode(0xff, 0xd8, 0xff, '0'.charCodeAt(0)))}`;
+    const first = result.bookmarks[0].thumbnail;
+    expect(first?.type).toBe('data');
+    if (first?.type === 'data') expect(first.value).toBe(expected);
+  });
+
+  it('skips only the offending row when one thumbnail in a batch fails to decrypt', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(3));
+    vi.mocked(apiFetch).mockImplementation(async (path) => batchRows(path as string));
+    vi.mocked(decryptBinary).mockImplementation(async (_key, enc) => {
+      if ((enc as string) === 'enc-img-1') throw new Error('decrypt failed');
+      return JPEG_BYTES;
+    });
+
+    const result = await exportBookmarks(FAKE_KEY, {
+      ...DEFAULT_OPTIONS,
+      includeThumbnails: true,
+      thumbnailErrorPolicy: 'skip',
+    });
+
+    expect(result.bookmarks[0].thumbnail?.type).toBe('data');
+    expect(result.bookmarks[1].thumbnail).toBeNull();
+    expect(result.bookmarks[2].thumbnail?.type).toBe('data');
+  });
+
+  it('skips only the missing row when a batch response omits an id', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(3));
+    vi.mocked(apiFetch).mockImplementation(async (path) =>
+      batchRows(path as string).filter((r) => r.id !== 'img-1'),
+    );
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    const result = await exportBookmarks(FAKE_KEY, {
+      ...DEFAULT_OPTIONS,
+      includeThumbnails: true,
+      thumbnailErrorPolicy: 'skip',
+    });
+
+    expect(result.bookmarks[0].thumbnail?.type).toBe('data');
+    expect(result.bookmarks[1].thumbnail).toBeNull();
+    expect(result.bookmarks[2].thumbnail?.type).toBe('data');
+  });
+});
+
+describe('exportBookmarks — transient failure handling', () => {
+  it('retries a rate-limited batch and still embeds its thumbnails', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(2));
+    let attempts = 0;
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      attempts++;
+      if (attempts === 1) throw new ApiError(429, 'Too many requests. Please wait a moment and try again.');
+      return batchRows(path as string);
+    });
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    const result = await exportBookmarks(FAKE_KEY, {
+      ...DEFAULT_OPTIONS,
+      ...FAST_RETRY,
+      includeThumbnails: true,
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.bookmarks.filter((b) => b.thumbnail?.type === 'data')).toHaveLength(2);
+  });
+
+  it('retries a 5xx batch and still embeds its thumbnails', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(1));
+    let attempts = 0;
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      attempts++;
+      if (attempts === 1) throw new ApiError(503, 'The service is temporarily unavailable.');
+      return batchRows(path as string);
+    });
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    const result = await exportBookmarks(FAKE_KEY, {
+      ...DEFAULT_OPTIONS,
+      ...FAST_RETRY,
+      includeThumbnails: true,
+    });
+
+    expect(attempts).toBe(2);
+    expect(result.bookmarks[0].thumbnail?.type).toBe('data');
+  });
+
+  it('fails the export instead of silently dropping thumbnails when rate limiting persists', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(5));
+    vi.mocked(apiFetch).mockRejectedValue(new ApiError(429, 'Too many requests.'));
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    // The reported bug: under the skip policy this resolved with thumbnail:null
+    // and the UI reported success. A retryable failure must now be fatal.
+    await expect(
+      exportBookmarks(FAKE_KEY, {
+        ...DEFAULT_OPTIONS,
+        ...FAST_RETRY,
+        includeThumbnails: true,
+        thumbnailErrorPolicy: 'skip',
+      }),
+    ).rejects.toThrow(/thumbnail/i);
+  });
+
+  it('does not retry a permanently unusable row', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(1));
+    vi.mocked(apiFetch).mockImplementation(async (path) => batchRows(path as string));
+    vi.mocked(decryptBinary).mockResolvedValue(NON_JPEG_BYTES);
+
+    const result = await exportBookmarks(FAKE_KEY, {
+      ...DEFAULT_OPTIONS,
+      ...FAST_RETRY,
+      includeThumbnails: true,
+      thumbnailErrorPolicy: 'skip',
+    });
+
+    expect(result.bookmarks[0].thumbnail).toBeNull();
+    // A corrupt payload will never become valid — retrying it just burns budget.
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the number of permanently skipped thumbnails through progress', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(3));
+    vi.mocked(apiFetch).mockImplementation(async (path) => batchRows(path as string));
+    vi.mocked(decryptBinary).mockImplementation(async (_key, enc) =>
+      (enc as string) === 'enc-img-1' ? NON_JPEG_BYTES : JPEG_BYTES,
+    );
+
+    const progress = vi.fn();
+    await exportBookmarks(
+      FAKE_KEY,
+      { ...DEFAULT_OPTIONS, ...FAST_RETRY, includeThumbnails: true, thumbnailErrorPolicy: 'skip' },
+      progress,
+    );
+
+    const thumbEvents = progress.mock.calls
+      .map(([p]) => p as { phase: string; skipped?: number })
+      .filter((p) => p.phase === 'thumbnails');
+    expect(thumbEvents.at(-1)?.skipped).toBe(1);
+  });
+
+  it('reports zero skipped thumbnails when every thumbnail succeeds', async () => {
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(3));
+    vi.mocked(apiFetch).mockImplementation(async (path) => batchRows(path as string));
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    const progress = vi.fn();
+    await exportBookmarks(
+      FAKE_KEY,
+      { ...DEFAULT_OPTIONS, ...FAST_RETRY, includeThumbnails: true },
+      progress,
+    );
+
+    const thumbEvents = progress.mock.calls
+      .map(([p]) => p as { phase: string; skipped?: number })
+      .filter((p) => p.phase === 'thumbnails');
+    expect(thumbEvents.at(-1)?.skipped).toBe(0);
+  });
+
+  it('aborts promptly while waiting to retry a rate-limited batch', async () => {
+    const ctrl = new AbortController();
+    vi.mocked(getBookmarks).mockResolvedValueOnce(makeThumbBookmarks(2));
+    vi.mocked(apiFetch).mockImplementation(async () => {
+      ctrl.abort();
+      throw new ApiError(429, 'Too many requests.');
+    });
+    vi.mocked(decryptBinary).mockResolvedValue(JPEG_BYTES);
+
+    await expect(
+      exportBookmarks(
+        FAKE_KEY,
+        // Long backoff: the only way this resolves quickly is if the abort
+        // interrupts the wait rather than sleeping through it.
+        { ...DEFAULT_OPTIONS, includeThumbnails: true, thumbnailRetryBaseMs: 60_000 },
+        undefined,
+        ctrl.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
 
