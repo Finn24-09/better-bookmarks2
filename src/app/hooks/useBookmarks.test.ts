@@ -29,6 +29,7 @@ vi.mock('../../lib/thumbnails', () => ({
 import { getBookmarks } from '../../lib/bookmarks';
 import { getTags } from '../../lib/tags';
 import { fetchThumbnailObjectUrl } from '../../lib/thumbnails';
+import { ApiError } from '../../lib/api';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,6 +49,11 @@ function makeBookmarks(count: number, idOffset = 0): Bookmark[] {
     keyVersion: 1,
     thumbnailKeyVersion: null,
   }));
+}
+
+/** Give each bookmark an uploaded thumbnail so the grid must fetch an image. */
+function withThumbnails(bms: Bookmark[]): Bookmark[] {
+  return bms.map((b) => ({ ...b, thumbnailFileId: `img-${b.id}` }));
 }
 
 // ---------------------------------------------------------------------------
@@ -434,5 +440,116 @@ describe('useBookmarks', () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Thumbnail failures must not sink the bookmark list
+  //
+  // Thumbnail reads share Nginx's api_read limit_req zone with the bookmark
+  // list itself, so a 429 on one card's image is routine. It used to escape
+  // runWithConcurrency and reject the whole load(), replacing every bookmark
+  // with an error even though the bookmarks themselves had loaded fine.
+  // -------------------------------------------------------------------------
+
+  describe('thumbnail failure tolerance', () => {
+    it('still returns every bookmark when one thumbnail fetch fails', async () => {
+      const bms = withThumbnails(makeBookmarks(3));
+      vi.mocked(getBookmarks).mockResolvedValue(bms);
+      vi.mocked(fetchThumbnailObjectUrl).mockImplementation(async (imageId) => {
+        if (imageId === 'img-bm-1') throw new ApiError(429, 'Too many requests.');
+        return `blob:${imageId}`;
+      });
+
+      const { result } = renderHook(() => useBookmarks({ search: '', selectedTagId: null }));
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 4000 });
+      expect(result.current.bookmarks).toHaveLength(3);
+      expect(result.current.error).toBeNull();
+    });
+
+    it('leaves the failed card without a thumbnail and keeps the others', async () => {
+      const bms = withThumbnails(makeBookmarks(3));
+      vi.mocked(getBookmarks).mockResolvedValue(bms);
+      vi.mocked(fetchThumbnailObjectUrl).mockImplementation(async (imageId) => {
+        if (imageId === 'img-bm-1') throw new ApiError(429, 'Too many requests.');
+        return `blob:${imageId}`;
+      });
+
+      const { result } = renderHook(() => useBookmarks({ search: '', selectedTagId: null }));
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 4000 });
+      const byId = new Map(result.current.bookmarks.map((b) => [b.id, b]));
+      expect(byId.get('bm-0')!.thumbnailUrl).toBe('blob:img-bm-0');
+      expect(byId.get('bm-1')!.thumbnailUrl).toBeNull();
+      expect(byId.get('bm-2')!.thumbnailUrl).toBe('blob:img-bm-2');
+    });
+
+    it('surfaces no error when every thumbnail fails', async () => {
+      const bms = withThumbnails(makeBookmarks(3));
+      vi.mocked(getBookmarks).mockResolvedValue(bms);
+      vi.mocked(fetchThumbnailObjectUrl).mockRejectedValue(new ApiError(429, 'Too many requests.'));
+
+      const { result } = renderHook(() => useBookmarks({ search: '', selectedTagId: null }));
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 4000 });
+      // A missing decorative image is not a load failure.
+      expect(result.current.bookmarks).toHaveLength(3);
+      expect(result.current.error).toBeNull();
+    });
+
+    it('retries a rate-limited thumbnail and uses the eventual result', async () => {
+      const bms = withThumbnails(makeBookmarks(1));
+      vi.mocked(getBookmarks).mockResolvedValue(bms);
+      let attempts = 0;
+      vi.mocked(fetchThumbnailObjectUrl).mockImplementation(async (imageId) => {
+        attempts++;
+        if (attempts === 1) throw new ApiError(429, 'Too many requests.');
+        return `blob:${imageId}`;
+      });
+
+      const { result } = renderHook(() => useBookmarks({ search: '', selectedTagId: null }));
+
+      await waitFor(() => expect(result.current.bookmarks[0]?.thumbnailUrl).toBe('blob:img-bm-0'), { timeout: 4000 });
+      expect(attempts).toBe(2);
+    });
+
+    it('does not retry a permanently missing thumbnail', async () => {
+      const bms = withThumbnails(makeBookmarks(1));
+      vi.mocked(getBookmarks).mockResolvedValue(bms);
+      let attempts = 0;
+      vi.mocked(fetchThumbnailObjectUrl).mockImplementation(async () => {
+        attempts++;
+        throw new Error('Thumbnail image not found');
+      });
+
+      const { result } = renderHook(() => useBookmarks({ search: '', selectedTagId: null }));
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 4000 });
+      expect(attempts).toBe(1);
+      expect(result.current.bookmarks).toHaveLength(1);
+    });
+
+    it('keeps infinite scroll alive when a thumbnail fails during loadMore', async () => {
+      vi.mocked(getBookmarks)
+        .mockResolvedValueOnce(withThumbnails(makeBookmarks(21)))
+        .mockResolvedValueOnce(withThumbnails(makeBookmarks(21, 100)));
+      vi.mocked(fetchThumbnailObjectUrl).mockImplementation(async (imageId) => {
+        if (imageId === 'img-bm-100') throw new ApiError(429, 'Too many requests.');
+        return `blob:${imageId}`;
+      });
+
+      const { result } = renderHook(() => useBookmarks({ search: '', selectedTagId: null }));
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 4000 });
+      expect(result.current.hasMore).toBe(true);
+
+      await act(async () => { await result.current.loadMore(); });
+      await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 4000 });
+
+      // A failed image used to set hasMore=false, permanently killing the
+      // IntersectionObserver sentinel.
+      expect(result.current.bookmarks).toHaveLength(40);
+      expect(result.current.hasMore).toBe(true);
+      expect(result.current.error).toBeNull();
+    });
   });
 });
