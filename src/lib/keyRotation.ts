@@ -16,11 +16,14 @@
 //     derives, recoverable only through RecoveryModal with the exact same
 //     intended new password.
 //
-//  2. Bounded fan-out with retry. Thumbnail reads and writes both land in
-//     Nginx's `api_read` limit_req zone (rate=60r/m, burst=20), which absorbs
-//     only ~21 requests in a short burst. An unbounded fan-out over 23
-//     thumbnails issued 46 requests in two instantaneous bursts and was
-//     rate-limited into exactly the partial-rotation state above.
+//  2. Bounded fan-out with retry. Thumbnail reads land in Nginx's `api_read`
+//     limit_req zone (rate=60r/m, burst=20), which absorbs only ~21 requests in
+//     a short burst; writes land in `api_mutate` (rate=300r/m, burst=60). An
+//     unbounded fan-out over 23 thumbnails issued 46 requests in two
+//     instantaneous bursts and was rate-limited into exactly the
+//     partial-rotation state above. Both zones key on the client IP, so every
+//     client behind one NAT shares a bucket — the retry budget below is what
+//     makes this correct, not the headroom.
 //
 //  3. PATCH, never upsert. PostgREST's `resolution=merge-duplicates` would let
 //     us update many rows per request, but it runs as INSERT ... ON CONFLICT,
@@ -48,15 +51,19 @@ const THUMBNAIL_READ_BATCH_SIZE = 10;
 
 // Writes must stay per-row (invariant 3), so the request count cannot be
 // reduced -- only paced. A small bound plus retry keeps the burst inside the
-// api_read budget and lets the leaky bucket drain between waves.
+// api_mutate budget and lets the leaky bucket drain between waves.
 const WRITE_CONCURRENCY = 3;
 
-// The api_read bucket drains at 1 request/second, so N per-row writes need
-// roughly N seconds of draining once the burst allowance is spent. The retry
-// window therefore has to span that: measured against the real limiter with a
-// freshly-drained bucket, 23 thumbnail writes need up to 7 attempts and clear
-// in ~23s. Four attempts (~5.6s) left roughly one write per rotation
-// permanently rejected — i.e. still a partial rotation.
+// The write bucket absorbs 60 requests before it starts metering and then
+// drains at 5/second, so a typical account's rotation never waits at all. The
+// retry budget covers the two cases that still queue: a library larger than the
+// burst, and several clients sharing one NAT'd IP and therefore one bucket.
+//
+// Deliberately left at 8 attempts. It was sized by measurement back when writes
+// shared the 1 req/s `api_read` drain, where four attempts (~5.6s) still left
+// roughly one write per rotation permanently rejected — i.e. still a partial
+// rotation. Shrinking it now would trade a correctness margin for nothing: on
+// the happy path these attempts are never spent.
 const RETRY_ATTEMPTS = 8;
 const RETRY_BASE_MS = 800;
 

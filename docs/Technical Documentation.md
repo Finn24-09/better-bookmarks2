@@ -60,7 +60,7 @@ All four containers run on the same `betterbookmarks2` Docker network. Only the 
 | `/api/rpc/sign_up`       | `postgrest:3000`         | 10 r/m                                                                                             |
 | `/api/rpc/change_password` | `postgrest:3000`       | 5 r/m (`auth_mutation` zone)                                                                       |
 | `/api/rpc/delete_account` | —                       | Returns `404` — legacy direct-delete path was removed in favour of the email-confirmed flow        |
-| `/api/(bookmarks_with_tags\|thumbnail_images)` | `postgrest:3000` | 60 r/m (`api_read` zone) — caps export-loop exfiltration                                          |
+| `/api/(bookmarks_with_tags\|thumbnail_images)` | `postgrest:3000` | 60 r/m (`api_read` zone) on GET/HEAD/POST — caps export-loop exfiltration; 300 r/m (`api_mutate`) on PATCH/PUT/DELETE |
 | Other `/api/*`           | `postgrest:3000`         | Default proxy block, no rate limit                                                                 |
 
 In dev, `vite dev` proxies `/api/*` directly to `postgrest:3000` and `email-service:5001` (both bound to host ports via `docker-compose.override.yml`). In production, the Nginx config in `docker/frontend/nginx.conf` is the only ingress.
@@ -916,7 +916,8 @@ Set unconditionally on every response (`add_header ... always`):
 | `signin`                 | 5 r/m    | `POST /api/rpc/sign_in` (burst 3)                                  |
 | `signup`                 | 10 r/m   | `POST /api/rpc/sign_up` (burst 5)                                  |
 | `auth_mutation`          | 5 r/m    | `POST /api/rpc/change_password` (burst 2)                          |
-| `api_read`               | 60 r/m   | `GET /api/bookmarks_with_tags`, `GET /api/thumbnail_images` (burst 20) — bounds export-loop exfiltration  |
+| `api_read`               | 60 r/m   | `/api/bookmarks_with_tags`, `/api/thumbnail_images` — GET/HEAD/POST and any unrecognised method (burst 20). Bounds export-loop exfiltration and POST-loop storage growth |
+| `api_mutate`             | 300 r/m  | `/api/bookmarks_with_tags`, `/api/thumbnail_images` — PATCH/PUT/DELETE only (burst 60). Looser because these methods cannot create rows: they overwrite or remove rows the caller already owns, bounded by the per-row `CHECK` caps. Sharing the `api_read` budget capped key rotation at ~40 thumbnails |
 | `email_reset`            | 3 r/m    | `request-reset`, `confirm-reset` (burst 2; `Retry-After: 20`)      |
 | `email_verify`           | 10 r/m   | `verify-email` (burst 5)                                           |
 | `email_resend`           | 3 r/m    | `resend-verification` (burst 2; `Retry-After: 20`)                 |
