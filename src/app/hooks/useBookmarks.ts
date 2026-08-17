@@ -3,9 +3,19 @@ import { useAuth } from '../contexts/AuthContext';
 import { getBookmarks, Bookmark } from '../../lib/bookmarks';
 import { getTags, Tag } from '../../lib/tags';
 import { fetchThumbnailObjectUrl } from '../../lib/thumbnails';
-import { runWithConcurrency } from '../../lib/utils';
+import { runWithConcurrency, withRetry } from '../../lib/utils';
 
 const PAGE_SIZE = 20;
+
+// Thumbnail reads share Nginx's api_read limit_req zone with the bookmark list
+// itself, so a 429 on one card's image is routine rather than exceptional.
+//
+// Exactly one retry, deliberately: a thumbnail is decorative, the grid waits on
+// these before rendering, and every retry spends budget the *list* request also
+// needs. One attempt rides out a transient rejection; beyond that the card just
+// shows its placeholder.
+const THUMB_RETRY_ATTEMPTS = 2;
+const THUMB_RETRY_BASE_MS = 600;
 
 interface UseBookmarksResult {
   bookmarks: Bookmark[];
@@ -64,8 +74,19 @@ export function useBookmarks({ search, selectedTagId }: UseBookmarksOptions): Us
           bookmarkFileIdRef.current.set(bm.id, bm.thumbnailFileId);
 
           if (!thumbCache.current.has(bm.thumbnailFileId)) {
-            const url = await fetchThumbnailObjectUrl(bm.thumbnailFileId, key);
-            thumbCache.current.set(bm.thumbnailFileId, url);
+            try {
+              const url = await withRetry(
+                () => fetchThumbnailObjectUrl(bm.thumbnailFileId!, key),
+                { attempts: THUMB_RETRY_ATTEMPTS, baseMs: THUMB_RETRY_BASE_MS },
+              );
+              thumbCache.current.set(bm.thumbnailFileId, url);
+            } catch {
+              // Leave this card without an image — BookmarkCard falls back to
+              // its placeholder. Letting the error escape rejected the whole
+              // load() and replaced every bookmark with an error message, so a
+              // single rate-limited image emptied the entire grid.
+              return;
+            }
           }
           results[i] = { ...bm, thumbnailUrl: thumbCache.current.get(bm.thumbnailFileId)! };
         },
