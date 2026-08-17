@@ -34,7 +34,7 @@ type ExportPhase =
       thumbnailsCurrent: number;
       thumbnailsTotal: number;
     }
-  | { phase: "done"; count: number; filename: string }
+  | { phase: "done"; count: number; filename: string; skippedThumbnails: number }
   | { phase: "error"; message: string };
 
 // ---------------------------------------------------------------------------
@@ -51,12 +51,17 @@ export function ExportBookmarksModal({ open, onClose }: ExportBookmarksModalProp
   const [isExporting, setIsExporting] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+  // Latest permanently-omitted thumbnail count reported by the export. Held in
+  // a ref because it must be readable when the run finishes, and progress
+  // events arrive faster than state commits.
+  const skippedRef = useRef(0);
 
   // ---- Reset ----
 
   const reset = () => {
     abortRef.current?.abort();
     abortRef.current = null;
+    skippedRef.current = 0;
     setState({ phase: "idle" });
     setAcknowledged(false);
     setIsExporting(false);
@@ -89,6 +94,9 @@ export function ExportBookmarksModal({ open, onClose }: ExportBookmarksModalProp
         thumbnailsTotal: 0,
       }));
     } else if (p.phase === "thumbnails") {
+      // Assigned outside the updater: React may re-invoke updaters, which would
+      // make an in-updater write a race (see CLAUDE.md / issue #45).
+      skippedRef.current = p.skipped ?? 0;
       setState((prev) => ({
         phase: "exporting",
         step: "thumbnails",
@@ -105,6 +113,7 @@ export function ExportBookmarksModal({ open, onClose }: ExportBookmarksModalProp
   const handleExport = async () => {
     if (isExporting || !cryptoKey) return;
     setIsExporting(true);
+    skippedRef.current = 0;
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -171,7 +180,12 @@ export function ExportBookmarksModal({ open, onClose }: ExportBookmarksModalProp
         );
       }
 
-      setState({ phase: "done", count: data.totalBookmarks, filename });
+      setState({
+        phase: "done",
+        count: data.totalBookmarks,
+        filename,
+        skippedThumbnails: skippedRef.current,
+      });
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         setState({ phase: "idle" });
@@ -387,6 +401,15 @@ export function ExportBookmarksModal({ open, onClose }: ExportBookmarksModalProp
           </p>
           <p className="text-sm text-white/50 font-mono">{state.filename}</p>
         </div>
+        {state.skippedThumbnails > 0 && (
+          <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-left">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-200/80 leading-relaxed">
+              {state.skippedThumbnails} thumbnail{state.skippedThumbnails !== 1 ? "s" : ""} could
+              not be included in this backup. Everything else exported normally.
+            </p>
+          </div>
+        )}
         <button type="button" onClick={handleClose} className={btnPrimary}>
           Done
         </button>
