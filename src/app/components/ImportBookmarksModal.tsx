@@ -13,7 +13,24 @@ import { validateJsonFile, parseJsonExport, JsonImportError, type ParsedJsonBook
 import { getTags, createTag, setBookmarkTags } from "../../lib/tags";
 import { createBookmark } from "../../lib/bookmarks";
 import { uploadThumbnailFromBytes } from "../../lib/thumbnails";
+import { withRetry, type RetryOptions } from "../../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+// POST /thumbnail_images is the only request in the import loop that lands in
+// a rate-limited nginx zone (api_read, 60 r/m, burst ~21) — bookmarks, tags and
+// bookmark_tags all go through the unlimited /api/ block. The loop is
+// sequential and each iteration takes well under a second, so restoring a
+// backup larger than the burst starts drawing 429s partway through.
+//
+// Five attempts is generous for a sequential caller: the bucket refills at
+// 1 req/s, so an upload rejected on the first try almost always lands on the
+// second. There is no concurrent worker here to starve one request behind
+// another, which is why this needs a smaller budget than key rotation's.
+const THUMBNAIL_UPLOAD_RETRY: RetryOptions = { attempts: 5, baseMs: 800, maxDelayMs: 3000 };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -83,6 +100,7 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
   const [showFormat, setShowFormat] = useState(false);
   const [progress, setProgress] = useState(0);
   const [importedCount, setImportedCount] = useState(0);
+  const [skippedThumbnails, setSkippedThumbnails] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -95,6 +113,7 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
     setShowFormat(false);
     setProgress(0);
     setImportedCount(0);
+    setSkippedThumbnails(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -199,13 +218,16 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
     // ends up with the newest created_at and appears at the top of the list
     // (bookmarks are ordered created_at DESC).
     let imported = 0;
+    let thumbnailsLost = 0;
     for (let i = rows.length - 1; i >= 0; i--) {
-      await createImportRow(rows[i], tagMap, cryptoKey, userId);
+      const { thumbnailSkipped } = await createImportRow(rows[i], tagMap, cryptoKey, userId);
+      if (thumbnailSkipped) thumbnailsLost++;
       imported++;
       setProgress(imported);
     }
 
     setImportedCount(imported);
+    setSkippedThumbnails(thumbnailsLost);
     setState("done");
     onImport();
   };
@@ -215,20 +237,32 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
     tagMap: Map<string, string>,
     key: CryptoKey,
     uid: string,
-  ) => {
+  ): Promise<{ thumbnailSkipped: boolean }> => {
     // Upload embedded thumbnail bytes (from JSON export) before creating the bookmark.
     let thumbnailFileId: string | null = null;
-    if (row.thumbnailData) {
+    let thumbnailSkipped = false;
+
+    // Bound to a const so the narrowing survives into the retry closure.
+    const bytes = row.thumbnailData;
+    if (bytes) {
       try {
-        thumbnailFileId = await uploadThumbnailFromBytes(
-          row.thumbnailData,
-          row.thumbnailOriginalName ?? "thumbnail.jpg",
-          key,
-          uid,
+        thumbnailFileId = await withRetry(
+          () => uploadThumbnailFromBytes(
+            bytes,
+            row.thumbnailOriginalName ?? "thumbnail.jpg",
+            key,
+            uid,
+          ),
+          THUMBNAIL_UPLOAD_RETRY,
         );
       } catch {
-        // Upload failure: skip the thumbnail, still create the bookmark
+        // Still create the bookmark. Aborting mid-import would leave a partial
+        // library the user has to de-duplicate by hand before retrying, which
+        // is worse than one missing image. But the loss is counted and shown:
+        // reporting "Imported 200 bookmarks" while silently discarding their
+        // images is the failure mode this replaces.
         thumbnailFileId = null;
+        thumbnailSkipped = true;
       }
     }
 
@@ -249,6 +283,8 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
     if (tagIds.length > 0) {
       await setBookmarkTags(id, tagIds, []);
     }
+
+    return { thumbnailSkipped };
   };
 
   // ---------------------------------------------------------------------------
@@ -386,6 +422,13 @@ export function ImportBookmarksModal({ open, onClose, onImport }: ImportBookmark
       {parseResult && parseResult.skipped.length > 0 && (
         <p className="text-sm text-white/50">
           {parseResult.skipped.length} item{parseResult.skipped.length !== 1 ? "s were" : " was"} skipped
+        </p>
+      )}
+      {skippedThumbnails > 0 && (
+        <p className="text-sm text-amber-400/80">
+          {skippedThumbnails} thumbnail image{skippedThumbnails !== 1 ? "s" : ""} could not be uploaded
+          {skippedThumbnails !== 1 ? " and were" : " and was"} skipped. Those bookmarks were imported
+          without their image.
         </p>
       )}
       <DialogClose asChild>
