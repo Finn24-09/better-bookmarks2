@@ -170,39 +170,6 @@ export async function fetchThumbnailObjectUrl(
 // Re-encrypt (key rotation on password change)
 // ---------------------------------------------------------------------------
 
-/**
- * Fetch, decrypt with oldKey, re-encrypt with newKey, and write both the
- * binary data and original filename back to thumbnail_images.
- *
- * The original filename is sourced from the server (original_name_enc) rather
- * than a caller-supplied string, preventing silent overwrites with empty values.
- */
-export async function reencryptThumbnail(
-  imageId: string,
-  oldKey: CryptoKey,
-  newKey: CryptoKey,
-): Promise<void> {
-  const rows = await apiFetch<{ data_enc: string; original_name_enc: string }[]>(
-    `/thumbnail_images?id=eq.${imageId}&select=data_enc,original_name_enc`,
-  );
-  if (!rows?.length) return;
-
-  const [imageBytes, originalName] = await Promise.all([
-    decryptBinary(oldKey, rows[0].data_enc),
-    decrypt(oldKey, rows[0].original_name_enc),
-  ]);
-
-  const [newDataEnc, newOriginalNameEnc] = await Promise.all([
-    encryptBinary(newKey, imageBytes),
-    encrypt(newKey, originalName),
-  ]);
-
-  await apiFetch(`/thumbnail_images?id=eq.${imageId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ data_enc: newDataEnc, original_name_enc: newOriginalNameEnc }),
-  });
-}
-
 /** A thumbnail row re-encrypted in memory, ready to be written. */
 export interface ThumbnailRotationBody {
   imageId: string;

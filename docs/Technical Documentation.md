@@ -251,7 +251,7 @@ The modal uses a two-phase ordering chosen so an interrupted run leaves the DB r
 3. **Derive** the new key client-side.
 4. **Fetch** all bookmarks and tags with the *current* key.
 5. **Re-encrypt bookmark text fields** (`title`, `url`, `thumbnail_url`): all crypto in parallel, all PATCHes set `key_version = targetVersion`.
-6. **Re-encrypt thumbnail binaries — phase 1** (`reencryptThumbnailToBody`): fetch + decrypt + re-encrypt, in memory only.
+6. **Re-encrypt thumbnail binaries — phase 1** (`reencryptThumbnailBatchToBodies`): fetch + decrypt + re-encrypt, in memory only, batched ten rows per request.
 7. **Re-encrypt thumbnail binaries — phase 2:** PATCH all `thumbnail_images` rows with `{data_enc, original_name_enc, key_version: targetVersion}`. Splitting crypto from DB writes means a network failure between phases leaves a clean "some rows stale, some rows new" state that recovery can finish.
 8. **Re-encrypt tags** (`reencryptTag`) — `name_hmac` is unchanged.
 9. **Fire-and-forget** `notifyPasswordChanged()`. Sent *before* `change_password` because that RPC bumps `token_version`, which would otherwise 401 the in-memory token before the email request reached the email service.
@@ -714,13 +714,15 @@ Same as `uploadThumbnail` but skips compression. Used by JSON import where bytes
 
 GETs `data_enc`, decrypts, and returns `URL.createObjectURL(blob)`. **Caller must call `URL.revokeObjectURL` when done.** `useBookmarks` manages this through a `thumbCache` ref that revokes all URLs on unmount.
 
-### `reencryptThumbnail(imageId, oldKey, newKey)`
+### `reencryptThumbnailBatchToBodies(imageIds, oldKey, newKey, signal?)`
 
-Fetches `data_enc` and `original_name_enc`, decrypts with `oldKey`, re-encrypts with `newKey`, PATCHes back. The original filename is read from the server (not passed in) to prevent silent overwrite with empty values.
+Reads every supplied row in a **single** request (`id=in.(...)`), decrypts each with `oldKey`, re-encrypts with `newKey`, and returns the bodies without writing anything. One request per thumbnail is what overran the `api_read` zone during rotation; the caller (`keyRotation.ts`) chunks the ids and applies retry and concurrency.
 
-### `reencryptThumbnailToBody(imageId, oldKey, newKey)`
+Throws if any requested id is absent from the response. Returning an empty body for a row that does exist would have the caller PATCH live thumbnail data away — so an unreadable row aborts the read phase, before any write has been issued.
 
-Same as `reencryptThumbnail` but returns the encrypted body without writing. Used for the two-phase rotation in `ChangePasswordModal` and `RecoveryModal`: phase 1 collects all bodies, phase 2 fires all PATCHes — so a network failure between phases leaves recoverable state.
+### `writeReencryptedThumbnail(body, targetVersion)`
+
+PATCHes one re-encrypted body back, stamping `key_version = targetVersion`. Split from the read/crypto phase so a failure between the two leaves a clean "some rows stale, some rows new" state that `RecoveryModal` can finish.
 
 ### `deleteThumbnailImage(imageId)`
 
