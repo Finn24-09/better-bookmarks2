@@ -795,7 +795,7 @@ When `isFiltered`:
 | `FloatingFooter`           | `src/app/components/FloatingFooter.tsx`           | Fixed centered pill: app version + GitHub link                                                           |
 | `BookmarkFormModal`        | `src/app/components/BookmarkFormModal.tsx`        | Add/edit form with `react-hook-form` + `TagMultiSelect`                                                  |
 | `TagMultiSelect`           | `src/app/components/TagMultiSelect.tsx`           | Multi-select with create-on-type                                                                         |
-| `ImportBookmarksModal`     | `src/app/components/ImportBookmarksModal.tsx`     | CSV + JSON import with row-level errors                                                                  |
+| `ImportBookmarksModal`     | `src/app/components/ImportBookmarksModal.tsx`     | CSV + JSON import with row-level errors; thumbnail uploads retry transient failures and any that stay unusable are counted and reported on the done screen |
 | `ExportBookmarksModal`     | `src/app/components/ExportBookmarksModal.tsx`     | JSON / CSV export with progress bar and AbortSignal cancel                                               |
 | `ChangePasswordModal`      | `src/app/components/ChangePasswordModal.tsx`      | Two-phase happy-path key rotation; calls `notifyPasswordChanged` before `change_password`                |
 | `RecoveryModal`            | `src/app/components/RecoveryModal.tsx`            | Full-screen takeover when `partialRotation` is set; finishes an interrupted rotation                     |

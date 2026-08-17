@@ -44,6 +44,10 @@ vi.mock('../../lib/thumbnails', () => ({
 import { getTags, createTag, setBookmarkTags } from '../../lib/tags';
 import { createBookmark } from '../../lib/bookmarks';
 import { uploadThumbnailFromBytes } from '../../lib/thumbnails';
+// Real ApiError, not a stub: withRetry classifies via `instanceof`, so a
+// hand-rolled 429 lookalike would be treated as a permanent failure and the
+// retry assertions below would pass for the wrong reason.
+import { ApiError } from '../../lib/api';
 
 // ---------------------------------------------------------------------------
 // CSV fixtures
@@ -394,5 +398,110 @@ describe('ImportBookmarksModal — JSON', () => {
     await waitFor(() => {
       expect(onImport).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thumbnail upload resilience
+//
+// POST /thumbnail_images is the only request in the import loop that lands in
+// a rate-limited nginx zone (api_read, 60 r/m, burst ~21). The loop is
+// sequential and each iteration is well under a second, so restoring a backup
+// larger than the burst starts taking 429s partway through. Those used to be
+// swallowed silently: the image was dropped, the bookmark was created without
+// it, and the modal still reported an unqualified success.
+// ---------------------------------------------------------------------------
+
+describe('ImportBookmarksModal — thumbnail upload failures', () => {
+  const oneJsonThumbnail = (originalName = 'pic.jpg') =>
+    makeJsonExport([
+      {
+        title: 'T',
+        url: 'https://example.com',
+        tags: [],
+        thumbnail: { type: 'data', value: validDataUri, originalName },
+      },
+    ]);
+
+  async function runImport(file: File) {
+    renderModal();
+    pickFile(file);
+    await waitFor(() => screen.getByRole('button', { name: /^import/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^import/i }));
+  }
+
+  it('retries a rate-limited upload instead of dropping the image', async () => {
+    vi.mocked(uploadThumbnailFromBytes)
+      .mockRejectedValueOnce(new ApiError(429, 'Too Many Requests'))
+      .mockResolvedValueOnce('thumb-after-retry');
+
+    await runImport(oneJsonThumbnail());
+
+    // The bookmark must carry the image that the first attempt failed to
+    // upload — a 429 says nothing about the payload, only about timing.
+    await waitFor(
+      () => {
+        expect(createBookmark).toHaveBeenCalledWith(
+          expect.objectContaining({ thumbnailFileId: 'thumb-after-retry' }),
+          expect.anything(),
+          'user-1',
+        );
+      },
+      // One backoff of 800ms plus up to 800ms of jitter, so the default 1s
+      // waitFor window is not enough.
+      { timeout: 5000 },
+    );
+    expect(uploadThumbnailFromBytes).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a permanent upload failure', async () => {
+    vi.mocked(uploadThumbnailFromBytes).mockRejectedValue(new Error('Malformed image'));
+
+    await runImport(oneJsonThumbnail());
+
+    await waitFor(() => expect(createBookmark).toHaveBeenCalledTimes(1));
+    // Retrying a permanent failure only delays an import that cannot succeed.
+    expect(uploadThumbnailFromBytes).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the loss instead of claiming an unqualified success', async () => {
+    vi.mocked(uploadThumbnailFromBytes).mockRejectedValue(new Error('Malformed image'));
+
+    await runImport(oneJsonThumbnail());
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 thumbnail image could not be uploaded/i)).toBeInTheDocument();
+    });
+    // The bookmark itself still lands: aborting mid-import would leave a
+    // partial library the user has to de-duplicate by hand.
+    expect(createBookmark).toHaveBeenCalledWith(
+      expect.objectContaining({ thumbnailFileId: null }),
+      expect.anything(),
+      'user-1',
+    );
+  });
+
+  it('counts every thumbnail it could not upload', async () => {
+    vi.mocked(uploadThumbnailFromBytes).mockRejectedValue(new Error('Malformed image'));
+
+    await runImport(
+      makeJsonExport([
+        { title: 'A', url: 'https://a.com', tags: [], thumbnail: { type: 'data', value: validDataUri, originalName: 'a.jpg' } },
+        { title: 'B', url: 'https://b.com', tags: [], thumbnail: { type: 'data', value: validDataUri, originalName: 'b.jpg' } },
+      ]),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/2 thumbnail images could not be uploaded/i)).toBeInTheDocument();
+    });
+  });
+
+  it('does not warn when every upload succeeds', async () => {
+    vi.mocked(uploadThumbnailFromBytes).mockResolvedValue('thumb-ok');
+
+    await runImport(oneJsonThumbnail());
+
+    await waitFor(() => expect(screen.getByText(/imported 1 bookmark/i)).toBeInTheDocument());
+    expect(screen.queryByText(/could not be uploaded/i)).not.toBeInTheDocument();
   });
 });
