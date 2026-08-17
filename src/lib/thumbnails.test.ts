@@ -22,7 +22,8 @@ import {
   fetchThumbnailObjectUrl,
   deleteThumbnailImage,
   reencryptThumbnail,
-  reencryptThumbnailToBody,
+  reencryptThumbnailBatchToBodies,
+  writeReencryptedThumbnail,
 } from './thumbnails';
 
 // ---------------------------------------------------------------------------
@@ -297,53 +298,125 @@ describe('reencryptThumbnail', () => {
 });
 
 // ---------------------------------------------------------------------------
-// reencryptThumbnailToBody
+// reencryptThumbnailBatchToBodies / writeReencryptedThumbnail
 // ---------------------------------------------------------------------------
 
-describe('reencryptThumbnailToBody', () => {
-  it('returns encrypted body without calling PATCH', async () => {
+describe('reencryptThumbnailBatchToBodies', () => {
+  it('reads every id in one batched request and returns bodies for the new key', async () => {
     const { deriveKey: dk, encryptBinary: eb, encrypt: enc, decrypt: dec, decryptBinary: deb } =
       await import('./crypto');
     const oldKey = await dk('old-pass', 'user@example.com');
     const newKey = await dk('new-pass', 'user@example.com');
 
-    const fakeBytes = new Uint8Array([0xaa, 0xbb, 0xcc]);
-    const [oldDataEnc, oldNameEnc] = await Promise.all([
-      eb(oldKey, fakeBytes),
-      enc(oldKey, 'photo.jpg'),
+    const bytesA = new Uint8Array([0xaa, 0xbb, 0xcc]);
+    const bytesB = new Uint8Array([0x11, 0x22]);
+    const [encA, nameA, encB, nameB] = await Promise.all([
+      eb(oldKey, bytesA),
+      enc(oldKey, 'a.jpg'),
+      eb(oldKey, bytesB),
+      enc(oldKey, 'b.jpg'),
     ]);
 
-    vi.mocked(apiFetch).mockResolvedValueOnce([{ data_enc: oldDataEnc, original_name_enc: oldNameEnc }]);
+    vi.mocked(apiFetch).mockResolvedValueOnce([
+      // Reverse order proves rows are matched to ids by id, not by position.
+      { id: 'img-b', data_enc: encB, original_name_enc: nameB },
+      { id: 'img-a', data_enc: encA, original_name_enc: nameA },
+    ]);
 
-    const result = await reencryptThumbnailToBody('img-2', oldKey, newKey);
+    const bodies = await reencryptThumbnailBatchToBodies(['img-a', 'img-b'], oldKey, newKey);
 
-    // Only the GET was made — no PATCH
+    // One request for both ids — a request per thumbnail is what overran the
+    // nginx api_read budget during key rotation.
     expect(apiFetch).toHaveBeenCalledTimes(1);
-    expect(result.imageId).toBe('img-2');
-    expect(typeof result.data_enc).toBe('string');
-    expect(typeof result.original_name_enc).toBe('string');
+    expect(vi.mocked(apiFetch).mock.calls[0][0]).toContain('id=in.(img-a,img-b)');
 
-    // The new ciphertext must decrypt correctly with newKey
-    const [decBytes, decName] = await Promise.all([
-      deb(newKey, result.data_enc),
-      dec(newKey, result.original_name_enc),
+    const byId = new Map(bodies.map((b) => [b.imageId, b]));
+    const [decA, decNameA] = await Promise.all([
+      deb(newKey, byId.get('img-a')!.data_enc),
+      dec(newKey, byId.get('img-a')!.original_name_enc),
     ]);
-    expect(Array.from(decBytes)).toEqual(Array.from(fakeBytes));
-    expect(decName).toBe('photo.jpg');
+    expect(Array.from(decA)).toEqual(Array.from(bytesA));
+    expect(decNameA).toBe('a.jpg');
   });
 
-  it('returns empty strings when the thumbnail row is not found', async () => {
+  it('makes no PATCH — it only prepares bodies', async () => {
+    const { deriveKey: dk, encryptBinary: eb, encrypt: enc } = await import('./crypto');
+    const oldKey = await dk('old-pass', 'user@example.com');
+    const newKey = await dk('new-pass', 'user@example.com');
+
+    vi.mocked(apiFetch).mockResolvedValueOnce([
+      {
+        id: 'img-a',
+        data_enc: await eb(oldKey, new Uint8Array([1, 2])),
+        original_name_enc: await enc(oldKey, 'a.jpg'),
+      },
+    ]);
+
+    await reencryptThumbnailBatchToBodies(['img-a'], oldKey, newKey);
+
+    const patches = vi
+      .mocked(apiFetch)
+      .mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH');
+    expect(patches).toHaveLength(0);
+  });
+
+  it('throws rather than returning empty ciphertext when a row is missing', async () => {
     const { deriveKey: dk } = await import('./crypto');
     const oldKey = await dk('old-pass', 'user@example.com');
     const newKey = await dk('new-pass', 'user@example.com');
 
     vi.mocked(apiFetch).mockResolvedValueOnce([]);
 
-    const result = await reencryptThumbnailToBody('img-gone', oldKey, newKey);
+    // Returning empty strings here used to be the contract, and the caller
+    // PATCHed them straight back — so a response that yielded no rows for a
+    // row that does exist would overwrite live thumbnail data with ''.
+    await expect(
+      reencryptThumbnailBatchToBodies(['img-gone'], oldKey, newKey),
+    ).rejects.toThrow(/img-gone/);
+  });
 
-    expect(result.imageId).toBe('img-gone');
-    expect(result.data_enc).toBe('');
-    expect(result.original_name_enc).toBe('');
+  it('throws when apiFetch yields undefined instead of an array', async () => {
+    const { deriveKey: dk } = await import('./crypto');
+    const oldKey = await dk('old-pass', 'user@example.com');
+    const newKey = await dk('new-pass', 'user@example.com');
+
+    // apiFetch returns undefined when a 200 body fails to parse as JSON.
+    vi.mocked(apiFetch).mockResolvedValueOnce(undefined);
+
+    await expect(
+      reencryptThumbnailBatchToBodies(['img-a'], oldKey, newKey),
+    ).rejects.toThrow(/img-a/);
+  });
+
+  it('resolves to an empty list without any request when given no ids', async () => {
+    const { deriveKey: dk } = await import('./crypto');
+    const oldKey = await dk('old-pass', 'user@example.com');
+    const newKey = await dk('new-pass', 'user@example.com');
+
+    await expect(reencryptThumbnailBatchToBodies([], oldKey, newKey)).resolves.toEqual([]);
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('writeReencryptedThumbnail', () => {
+  it('PATCHes the row with the new ciphertext and the target key version', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(undefined);
+
+    await writeReencryptedThumbnail(
+      { imageId: 'img-a', data_enc: 'newdata', original_name_enc: 'newname' },
+      7,
+    );
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/thumbnail_images?id=eq.img-a',
+      expect.objectContaining({ method: 'PATCH' }),
+    );
+    const init = vi.mocked(apiFetch).mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      data_enc: 'newdata',
+      original_name_enc: 'newname',
+      key_version: 7,
+    });
   });
 });
 

@@ -4,10 +4,9 @@ import { AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { signIn, changePassword, rotationStatus } from "../../lib/auth";
 import { deriveKey, decrypt } from "../../lib/crypto";
-import { getBookmarkRows, reencryptBookmark, decryptBookmark } from "../../lib/bookmarks";
-import { getTagRows, reencryptTag } from "../../lib/tags";
-import { reencryptThumbnailToBody } from "../../lib/thumbnails";
-import { apiFetch } from "../../lib/api";
+import { getBookmarkRows, decryptBookmark } from "../../lib/bookmarks";
+import { getTagRows } from "../../lib/tags";
+import { reencryptRecords } from "../../lib/keyRotation";
 import { useAuth } from "../contexts/AuthContext";
 
 interface FormFields {
@@ -53,41 +52,39 @@ export function RecoveryModal() {
         getTagRows(),
       ]);
 
-      // Re-encrypt stale bookmark text fields.
+      // Only rows still BEHIND targetVersion need work. Rows already at
+      // targetVersion were re-encrypted by the interrupted attempt and must be
+      // left alone — which is why this flow requires the same intended new
+      // password as that attempt.
       const staleBookmarkRows = bookmarkRows.filter((r) => r.key_version < targetVersion);
-      const staleBookmarks = await Promise.all(
-        staleBookmarkRows.map((r) => decryptBookmark(r, cryptoKey)),
-      );
-      await Promise.all(
-        staleBookmarks.map((bm) => reencryptBookmark(bm, newKey, targetVersion)),
-      );
-
-      // Re-encrypt stale thumbnail binary files (two-phase).
       const staleThumbRows = staleBookmarkRows.filter(
         (r) => r.thumbnail_file_id && (r.thumbnail_key_version ?? 0) < targetVersion,
       );
-      const thumbBodies = await Promise.all(
-        staleThumbRows.map((r) =>
-          reencryptThumbnailToBody(r.thumbnail_file_id!, cryptoKey, newKey),
-        ),
-      );
-      await Promise.all(
-        thumbBodies.map(({ imageId, data_enc, original_name_enc }) =>
-          apiFetch(`/thumbnail_images?id=eq.${imageId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ data_enc, original_name_enc, key_version: targetVersion }),
-          }),
-        ),
-      );
-
-      // Re-encrypt stale tag names — decrypt with old key first, then re-encrypt with new.
       const staleTagRows = tagRows.filter((r) => r.key_version < targetVersion);
-      await Promise.all(
-        staleTagRows.map(async (r) => {
-          const name = await decrypt(cryptoKey, r.name_enc);
-          return reencryptTag(r.id, name, newKey, targetVersion);
-        }),
-      );
+
+      // Decrypt the stale records with the old key before any write, then hand
+      // the whole set to reencryptRecords, which finishes every read before it
+      // writes and bounds the fan-out. The previous unbounded Promise.all
+      // fan-outs could be rate-limited into leaving this recovery itself
+      // half-applied — the failure it exists to repair.
+      const [staleBookmarks, staleTags] = await Promise.all([
+        Promise.all(staleBookmarkRows.map((r) => decryptBookmark(r, cryptoKey))),
+        Promise.all(
+          staleTagRows.map(async (r) => ({
+            id: r.id,
+            name: await decrypt(cryptoKey, r.name_enc),
+          })),
+        ),
+      ]);
+
+      await reencryptRecords({
+        bookmarks: staleBookmarks,
+        thumbnailImageIds: staleThumbRows.map((r) => r.thumbnail_file_id!),
+        tags: staleTags,
+        oldKey: cryptoKey,
+        newKey,
+        targetVersion,
+      });
 
       await changePassword(data.currentPassword, data.newPassword);
       updateKey(newKey);

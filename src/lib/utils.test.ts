@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { runWithConcurrency } from './utils';
+import { runWithConcurrency, chunk, isAbortError, isRetryableError, withRetry } from './utils';
+import { ApiError } from './api';
 
 describe('runWithConcurrency', () => {
   it('processes every item exactly once', async () => {
@@ -113,5 +114,135 @@ describe('runWithConcurrency', () => {
     // iteration's abort check fired — verifies the await/abort ordering
     // contract that callers rely on for atomic per-item operations.
     expect(inFlightCompleted).toBe(1);
+  });
+});
+
+describe('chunk', () => {
+  it('splits into fixed-size groups with a short final group', () => {
+    expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it('returns an empty array for no items', () => {
+    expect(chunk([], 3)).toEqual([]);
+  });
+
+  it('returns a single group when size exceeds the item count', () => {
+    expect(chunk([1, 2], 10)).toEqual([[1, 2]]);
+  });
+});
+
+describe('isAbortError', () => {
+  it('recognises a DOMException abort', () => {
+    // DOMException does not inherit from Error in every environment we run in
+    // (notably jsdom), so an instanceof check would misclassify a cancellation
+    // as a transport failure.
+    expect(isAbortError(new DOMException('cancelled', 'AbortError'))).toBe(true);
+  });
+
+  it('does not treat an unrelated error as an abort', () => {
+    expect(isAbortError(new Error('boom'))).toBe(false);
+    expect(isAbortError(null)).toBe(false);
+    expect(isAbortError('AbortError')).toBe(false);
+  });
+});
+
+describe('isRetryableError', () => {
+  it('treats rate limiting and server faults as retryable', () => {
+    expect(isRetryableError(new ApiError(429, 'slow down'))).toBe(true);
+    expect(isRetryableError(new ApiError(500, 'oops'))).toBe(true);
+    expect(isRetryableError(new ApiError(503, 'unavailable'))).toBe(true);
+  });
+
+  it('treats a fetch network failure as retryable', () => {
+    // Browsers reject fetch with a TypeError on DNS/connection failures.
+    expect(isRetryableError(new TypeError('Failed to fetch'))).toBe(true);
+  });
+
+  it('treats client errors and plain failures as permanent', () => {
+    expect(isRetryableError(new ApiError(404, 'gone'))).toBe(false);
+    expect(isRetryableError(new ApiError(400, 'bad'))).toBe(false);
+    expect(isRetryableError(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('withRetry', () => {
+  it('returns the result without retrying when the call succeeds', async () => {
+    let attempts = 0;
+    const result = await withRetry(async () => {
+      attempts++;
+      return 'ok';
+    }, { attempts: 3, baseMs: 1 });
+
+    expect(result).toBe('ok');
+    expect(attempts).toBe(1);
+  });
+
+  it('retries a retryable failure and returns the eventual success', async () => {
+    let attempts = 0;
+    const result = await withRetry(async () => {
+      attempts++;
+      if (attempts < 3) throw new ApiError(429, 'slow down');
+      return 'ok';
+    }, { attempts: 3, baseMs: 1 });
+
+    expect(result).toBe('ok');
+    expect(attempts).toBe(3);
+  });
+
+  it('gives up after the configured attempts and rethrows', async () => {
+    let attempts = 0;
+    await expect(
+      withRetry(async () => {
+        attempts++;
+        throw new ApiError(429, 'slow down');
+      }, { attempts: 2, baseMs: 1 }),
+    ).rejects.toThrow('slow down');
+
+    expect(attempts).toBe(2);
+  });
+
+  it('does not retry a permanent failure', async () => {
+    let attempts = 0;
+    await expect(
+      withRetry(async () => {
+        attempts++;
+        throw new Error('permanent');
+      }, { attempts: 5, baseMs: 1 }),
+    ).rejects.toThrow('permanent');
+
+    expect(attempts).toBe(1);
+  });
+
+  it('caps the per-attempt backoff at maxDelayMs', async () => {
+    const delays: number[] = [];
+    let last = Date.now();
+    let attempts = 0;
+
+    await expect(
+      withRetry(async () => {
+        if (attempts > 0) delays.push(Date.now() - last);
+        last = Date.now();
+        attempts++;
+        throw new ApiError(429, 'slow down');
+      }, { attempts: 5, baseMs: 40, maxDelayMs: 60 }),
+    ).rejects.toThrow('slow down');
+
+    // Uncapped this would double to 40, 80, 160, 320 ms. The cap matters
+    // because the api_read bucket needs many seconds to drain, so a caller
+    // needs many attempts rather than a few enormous sleeps.
+    expect(attempts).toBe(5);
+    for (const d of delays) {
+      expect(d).toBeLessThan(60 + 40 + 60); // cap + max jitter + scheduler slack
+    }
+  });
+
+  it('interrupts the backoff wait when the signal aborts', async () => {
+    const ctrl = new AbortController();
+    await expect(
+      withRetry(async () => {
+        ctrl.abort();
+        throw new ApiError(429, 'slow down');
+      }, { attempts: 3, baseMs: 60_000, signal: ctrl.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
