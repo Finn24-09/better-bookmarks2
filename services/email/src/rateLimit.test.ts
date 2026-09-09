@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { TRUST_PROXY } from './trustProxy.js';
 
 // H-2: this test verifies that the rate-limit configuration produced by
 // src/rateLimit.ts behaves as expected — namely, that a per-route cap
@@ -35,11 +36,14 @@ const { requestResetRoute } = await import('./routes/requestReset.js');
 // S-4: Tight time window for the live 429 test so the window cannot roll
 // over before the 6th request lands on a slow CI runner. The behaviour
 // being verified — 5 OK then a 429 — is window-size-independent.
-// S-5: trustProxy:1 mirrors production (src/index.ts) so that the
-// X-Forwarded-For sent by the test actually drives req.ip. Without this,
-// req.ip stays loopback and the spoofed XFF→key mapping is not exercised.
+// S-5: import the same TRUST_PROXY production uses so the X-Forwarded-For
+// sent below actually drives req.ip. app.inject dials from 127.0.0.1, which
+// the `loopback` entry covers. Note this test cannot detect a broken trust
+// config on its own — every request below shares one source, so the 429
+// assertion holds whichever address won the key. trustProxy.test.ts pins the
+// resolved address itself.
 async function makeApp(routeOverride?: { rateLimit?: { max?: number; timeWindow?: number } }): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, trustProxy: 1 });
+  const app = Fastify({ logger: false, trustProxy: TRUST_PROXY });
   await app.register(rateLimit, rateLimitConfig.global);
 
   const originalCfg = rateLimitConfig.routes['/request-reset'];
@@ -88,7 +92,7 @@ describe('H-2: in-service rate limiting', () => {
         body: JSON.stringify({ email: 'alice@example.com' }),
       });
 
-    // S-5: trustProxy:1 in makeApp means req.ip resolves to the spoofed
+    // S-5: TRUST_PROXY in makeApp means req.ip resolves to the spoofed
     // x-forwarded-for value, so the rate-limit key is genuinely
     // IP-derived from the forwarded header — the path production
     // traffic actually takes.

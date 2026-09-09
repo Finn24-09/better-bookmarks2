@@ -5,6 +5,7 @@ import { SignJWT } from 'jose';
 import { createSecretKey } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { TRUST_PROXY } from '../trustProxy.js';
 
 vi.mock('../config.js', () => ({
   config: {
@@ -91,7 +92,7 @@ async function buildTestApp(
       redact: { paths: [...LOG_REDACT_PATHS], censor: '[redacted]', remove: false },
       serializers: { req: reqSerializer },
     },
-    trustProxy: 1,
+    trustProxy: TRUST_PROXY,
     bodyLimit: 4 * 1024,
     // Mirror the production buildServer() config so the trailing-slash
     // regression test exercises the same routing behaviour as a deployed
@@ -464,7 +465,7 @@ describe('POST /title — log sanitisation canary', () => {
         serializers: { req: reqSerializer },
         stream: { write: (chunk: string) => { logs.push(chunk); return true; } } as unknown as NodeJS.WritableStream,
       },
-      trustProxy: 1,
+      trustProxy: TRUST_PROXY,
       bodyLimit: 4 * 1024,
       // Mirror the production buildServer() config — see buildTestApp comment.
       routerOptions: { ignoreTrailingSlash: true },

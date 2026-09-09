@@ -379,7 +379,7 @@ A standalone Fastify 5 microservice. It is the *only* path for email verificatio
 
 | Concern             | Choice                                                                              |
 | ------------------- | ----------------------------------------------------------------------------------- |
-| HTTP framework      | Fastify 5 (`trustProxy: true`)                                                      |
+| HTTP framework      | Fastify 5 (`trustProxy: 'loopback,uniquelocal'` — only the front-door Nginx may set X-Forwarded-For) |
 | JWT                 | `jose` — verify-only, HS256 algorithm allowlist; the service shares `PGRST_JWT_SECRET` but never signs |
 | SMTP                | `nodemailer` — works against AWS SES, Mailgun, Postmark, or any STARTTLS provider   |
 | Validation          | `zod`                                                                               |
