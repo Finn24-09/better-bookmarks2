@@ -7,6 +7,7 @@ import { reqSerializer } from './logSerializers.js';
 import { registry } from './metrics.js';
 import { VERSION } from './version.js';
 import { titleRoute } from './routes/title.js';
+import { TRUST_PROXY } from './trustProxy.js';
 
 export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
   const fastify = Fastify({
@@ -23,10 +24,9 @@ export async function buildServer(): Promise<ReturnType<typeof Fastify>> {
       // global error handler would write those values to stdout.
       serializers: { req: reqSerializer },
     },
-    // Trust ONE proxy hop (the front-door Nginx). trustProxy:true would let a
-    // remote client forge X-Forwarded-For for both audit logs and rate-limit
-    // keying. trustProxy:1 peels exactly one hop.
-    trustProxy: 1,
+    // Only the front-door Nginx may set X-Forwarded-For. See trustProxy.ts
+    // for why this is a peer allow-list rather than a hop count.
+    trustProxy: TRUST_PROXY,
     // 4 KiB inbound body cap. The only legitimate body is `{"url":"…"}` with
     // URL length ≤ 2000; 4 KiB is two orders of magnitude above ceiling and
     // matches Nginx's per-location client_max_body_size 4k.

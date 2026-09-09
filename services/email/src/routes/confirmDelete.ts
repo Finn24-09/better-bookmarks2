@@ -119,9 +119,10 @@ export const confirmDeleteRoute: FastifyPluginAsync = async (fastify) => {
     }
 
     // Fire-and-forget audit log — failure must not block the success response.
-    // M-4: req.ip is derived from trustProxy:1 in src/index.ts (one trusted
-    // hop = Nginx). Reading x-real-ip directly would honour an attacker-
-    // controlled header from outside the trust boundary.
+    // M-4: req.ip is derived from TRUST_PROXY in src/trustProxy.ts, which
+    // honours X-Forwarded-For only when the peer is the front-door Nginx.
+    // Reading x-real-ip directly would honour an attacker-controlled header
+    // from outside the trust boundary.
     await pool.query(
       `INSERT INTO auth.security_audit_log (user_id, event_type, token_type, ip_address)
        VALUES ($1, 'account_deleted', 'delete_confirmation', $2)`,

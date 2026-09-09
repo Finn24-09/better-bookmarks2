@@ -16,6 +16,7 @@ import { notifyPasswordChangeRoute } from './routes/notifyPasswordChange.js';
 import { refreshAfterVerifyRoute } from './routes/refreshAfterVerify.js';
 import { LOG_REDACT_PATHS } from './logRedact.js';
 import { reqSerializer } from './logSerializers.js';
+import { TRUST_PROXY } from './trustProxy.js';
 
 // Re-export for backward compatibility with any external imports that
 // may have referenced this constant from `./index.js`.
@@ -44,14 +45,9 @@ const fastify = Fastify({
     // session-cookie leak into stdout. Keep the two sides in sync.
     serializers: { req: reqSerializer },
   },
-  // M-4: trust ONE proxy hop (the front-door Nginx). With trustProxy:true
-  // (boolean), Fastify accepts any value in X-Forwarded-For, which lets a
-  // remote client forge their apparent IP for both audit logs and
-  // rate-limit keying. trustProxy:1 makes Fastify peel exactly one hop —
-  // the trusted Nginx — and ignore further forwarded headers from outside
-  // the trust boundary. Adjust if the deployment puts more reverse
-  // proxies in front of this service.
-  trustProxy: 1,
+  // M-4: only the front-door Nginx may set X-Forwarded-For. See
+  // trustProxy.ts for why this is a peer allow-list rather than a hop count.
+  trustProxy: TRUST_PROXY,
   // SEC-014: cap inbound bodies at 64 KB. Nginx already sets
   // client_max_body_size 2M, but a defence-in-depth Fastify limit means
   // that if Nginx is bypassed (direct port-forward in dev, future ingress

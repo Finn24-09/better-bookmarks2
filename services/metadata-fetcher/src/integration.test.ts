@@ -6,6 +6,7 @@ import { SignJWT } from 'jose';
 import { createSecretKey } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { TRUST_PROXY } from './trustProxy.js';
 
 // Boot the full Fastify app and a real http.createServer target on
 // localhost. The injected dispatch IS the real fetcher's behaviour
@@ -134,7 +135,7 @@ async function buildApp(dispatch: DispatchFn, resolver: (host: string) => Promis
       redact: { paths: [...LOG_REDACT_PATHS], censor: '[redacted]', remove: false },
       serializers: { req: reqSerializer },
     },
-    trustProxy: 1,
+    trustProxy: TRUST_PROXY,
     bodyLimit: 4 * 1024,
     routerOptions: { ignoreTrailingSlash: true },
   });

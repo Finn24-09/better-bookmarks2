@@ -99,7 +99,7 @@ When creating new features or modifying existing ones, hold the line on these. T
 - Pino logger redacts via `LOG_REDACT_PATHS` and the custom `reqSerializer` — keep both in sync; query strings can leak tokens through `req.url`
 - Fastify error handler returns generic messages on 5xx; never leak internal error details
 - Body size cap (`bodyLimit: 64 * 1024`) is defence-in-depth — keep it
-- `trustProxy: 1` (one Nginx hop) — do not set `true`; that lets clients forge X-Forwarded-For
+- `trustProxy` comes from `TRUST_PROXY` in each service's `src/trustProxy.ts` (`'loopback,uniquelocal'` — a peer allow-list). Do not set `true`; that lets clients forge X-Forwarded-For. Do not set a hop count either: fastify 5.12.1 (GHSA-3m5p-2c4r-xxw2) made numeric `trustProxy` fail closed, which silently collapses every IP-keyed rate-limit bucket into one. `trustProxy.test.ts` pins both directions
 - Database access from the email service uses a **dedicated low-privilege role** (see `docker/db/init/07_email_service_role.sh`) — never use the PostgREST role
 - All `*_enc` columns are application-encrypted; the DB role must never have the key
 
