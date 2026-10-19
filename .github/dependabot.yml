@@ -35,6 +35,12 @@ updates:
           - "@tailwindcss/*"
           - "tailwindcss"
           - "vitest"
+    ignore:
+      # motion 14.2.0 and 14.3.0 contain motiondivision/motion#3937 (accelerated
+      # x/y transform animations can vanish), which AuthPage's form transitions
+      # would hit. Fixed in 14.3.1; remove this entry once main is on >= 14.3.1.
+      - dependency-name: "motion"
+        versions: [">=14.2.0 <14.3.1"]
     labels:
       - "dependencies"
       - "webapp"
