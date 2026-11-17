@@ -288,7 +288,7 @@ The frontend talks to the email service via `/api/email/*`:
 | `POST /api/email/request-delete` | bearer | Sends 15-min token via email |
 | `POST /api/email/confirm-delete` | bearer | Token + password → SECURITY DEFINER cascade delete |
 | `POST /api/email/notify-password-change` | bearer | Fire-and-forget audit email |
-| `POST /api/email/refresh-after-verify` | bearer (any) | Returns `{ token, email_verified: true }` for the user immediately after `mark_email_verified` (5-min DB-side window). The frontend swaps the in-memory JWT so the metadata-fetcher gate accepts the next call without re-sign-in. See `docker/db/init/12_post_verify_jwt.sql`. |
+| `POST /api/email/refresh-after-verify` | bearer (any) | Returns `{ token }`: a fresh JWT carrying the `email_verified: true` claim, minted for the user immediately after `mark_email_verified` (5-min DB-side window). The body deliberately has no `email_verified` field; the claim is authoritative. The frontend swaps the in-memory JWT so the metadata-fetcher gate accepts the next call without re-sign-in. See `docker/db/init/12_post_verify_jwt.sql`. |
 
 The frontend talks to the metadata-fetcher via a single route at `/api/title/`:
 
