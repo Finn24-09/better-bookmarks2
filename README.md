@@ -1,3 +1,7 @@
+> [!WARNING]
+> **This repository has been archived and is no longer actively maintained.** 
+> It remains available as a read-only reference, but pull requests and issues will not be reviewed.
+
 <div align="center">
 
 # 🔖 Better Bookmarks 2
